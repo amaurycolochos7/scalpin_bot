@@ -24,9 +24,9 @@ Write-Host "Instalando Python (esto toma 1-2 minutos)..." -ForegroundColor Gray
 Start-Process -FilePath $pythonInstaller -ArgumentList "/quiet", "InstallAllUsers=1", "PrependPath=1", "Include_test=0" -Wait
 
 # Actualizar PATH en la sesión actual
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
 
-Write-Host "Python instalado ✓" -ForegroundColor Green
+Write-Host "Python instalado OK" -ForegroundColor Green
 python --version
 
 # ============================================
@@ -45,7 +45,7 @@ Write-Host "Instalando Git..." -ForegroundColor Gray
 Start-Process -FilePath $gitInstaller -ArgumentList "/VERYSILENT", "/NORESTART" -Wait
 
 # Actualizar PATH
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+$env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
 Write-Host "Git instalado ✓" -ForegroundColor Green
 
@@ -67,7 +67,8 @@ git clone https://github.com/amaurycolochos7/scalpin_bot.git
 
 if (Test-Path "C:\scalpin_bot") {
     Write-Host "Repositorio clonado ✓" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "ERROR: No se pudo clonar el repositorio" -ForegroundColor Red
     exit 1
 }
@@ -108,7 +109,8 @@ Write-Host "[6/7] Configurando credenciales..." -ForegroundColor Yellow
 
 if (Test-Path ".env") {
     Write-Host "Archivo .env ya existe, saltando..." -ForegroundColor Gray
-} else {
+}
+else {
     Copy-Item ".env.example" ".env"
     Write-Host ""
     Write-Host "═══════════════════════════════════════════" -ForegroundColor Cyan

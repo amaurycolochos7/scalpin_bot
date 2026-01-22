@@ -526,16 +526,22 @@ async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         
         if mtf_result.should_trade:
+            # Usar porcentajes para TP/SL (mismo que get_strategy)
+            SL_PERCENT = 0.10
+            TP1_PERCENT = 0.05
+            TP2_PERCENT = 0.10
+            TP3_PERCENT = 0.15
+            
             if mtf_result.trade_direction == "LONG":
-                strategy['sl'] = round(mtf_result.price - (atr * 1.0), 6)
-                strategy['tp1'] = round(mtf_result.price + (atr * 1.2), 6)
-                strategy['tp2'] = round(mtf_result.price + (atr * 2.0), 6)
-                strategy['tp3'] = round(mtf_result.price + (atr * 3.0), 6)
+                strategy['sl'] = round(mtf_result.price * (1 - SL_PERCENT), 6)
+                strategy['tp1'] = round(mtf_result.price * (1 + TP1_PERCENT), 6)
+                strategy['tp2'] = round(mtf_result.price * (1 + TP2_PERCENT), 6)
+                strategy['tp3'] = round(mtf_result.price * (1 + TP3_PERCENT), 6)
             else:
-                strategy['sl'] = round(mtf_result.price + (atr * 1.0), 6)
-                strategy['tp1'] = round(mtf_result.price - (atr * 1.2), 6)
-                strategy['tp2'] = round(mtf_result.price - (atr * 2.0), 6)
-                strategy['tp3'] = round(mtf_result.price - (atr * 3.0), 6)
+                strategy['sl'] = round(mtf_result.price * (1 + SL_PERCENT), 6)
+                strategy['tp1'] = round(mtf_result.price * (1 - TP1_PERCENT), 6)
+                strategy['tp2'] = round(mtf_result.price * (1 - TP2_PERCENT), 6)
+                strategy['tp3'] = round(mtf_result.price * (1 - TP3_PERCENT), 6)
             
             risk = abs(strategy['entry'] - strategy['sl'])
             strategy['rr'] = round(abs(strategy['tp2'] - strategy['entry']) / risk, 2) if risk > 0 else 0

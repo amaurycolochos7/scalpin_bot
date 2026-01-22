@@ -63,10 +63,11 @@ def get_strategy(analysis: dict, atr: float) -> dict:
         strategy['action'] = 'COMPRAR' if signal == SignalType.STRONG_BUY else 'LONG'
         strategy['conf'] = min(95, score + 10) if signal == SignalType.STRONG_BUY else score
         strategy['entry'] = price
-        strategy['sl'] = round(price - (atr * 1.0), 6)  # Scalping: SL más ajustado
-        strategy['tp1'] = round(price + (atr * 1.2), 6)  # Ganancia rápida 1
-        strategy['tp2'] = round(price + (atr * 2.0), 6)  # Ganancia rápida 2
-        strategy['tp3'] = round(price + (atr * 3.0), 6)  # Ganancia extendida
+        # Usar porcentajes fijos (sugerencia de experto en trading)
+        strategy['sl'] = round(price * 0.90, 6)  # -10% stop loss
+        strategy['tp1'] = round(price * 1.05, 6)  # +5% ganancia rapida
+        strategy['tp2'] = round(price * 1.10, 6)  # +10% objetivo principal
+        strategy['tp3'] = round(price * 1.15, 6)  # +15% ganancia extendida
         risk = abs(strategy['entry'] - strategy['sl'])
         strategy['rr'] = round((strategy['tp2'] - strategy['entry']) / risk, 2) if risk > 0 else 0
         
@@ -76,10 +77,11 @@ def get_strategy(analysis: dict, atr: float) -> dict:
         strategy['action'] = 'VENDER' if signal == SignalType.STRONG_SELL else 'SHORT'
         strategy['conf'] = min(95, 100 - score + 10) if signal == SignalType.STRONG_SELL else 100 - score
         strategy['entry'] = price
-        strategy['sl'] = round(price + (atr * 1.0), 6)  # Scalping: SL más ajustado
-        strategy['tp1'] = round(price - (atr * 1.2), 6)  # Ganancia rápida 1
-        strategy['tp2'] = round(price - (atr * 2.0), 6)  # Ganancia rápida 2
-        strategy['tp3'] = round(price - (atr * 3.0), 6)  # Ganancia extendida
+        # Usar porcentajes fijos (sugerencia de experto en trading)
+        strategy['sl'] = round(price * 1.10, 6)  # +10% stop loss
+        strategy['tp1'] = round(price * 0.95, 6)  # -5% ganancia rapida
+        strategy['tp2'] = round(price * 0.90, 6)  # -10% objetivo principal
+        strategy['tp3'] = round(price * 0.85, 6)  # -15% ganancia extendida
         risk = abs(strategy['sl'] - strategy['entry'])
         strategy['rr'] = round((strategy['entry'] - strategy['tp2']) / risk, 2) if risk > 0 else 0
     

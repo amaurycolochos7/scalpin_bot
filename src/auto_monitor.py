@@ -173,9 +173,8 @@ class AutoMonitor:
                 'entry_price': entry_price,
                 'tp_price': tp_price,
                 'sl_price': sl_price,
-                'tp_percent': tp_percent if signal_type else None,
-                'sl_percent': sl_percent if signal_type else None,
-                'technical_analysis': tech_analysis,  # Include full analysis details
+                'technical_analysis': tech_analysis,
+                'chart_path': self._generate_chart(df, symbol_name) if entry_allowed or (ml_probability > 0.8) else None,  # Generate chart for good candidates
                 'timestamp': datetime.now().isoformat()
             }
             
@@ -183,6 +182,51 @@ class AutoMonitor:
             
         except Exception as e:
             logger.error(f"Error analyzing {symbol_info['name']}: {e}")
+            return None
+
+    def _generate_chart(self, df: pd.DataFrame, symbol_name: str) -> str:
+        """Generate candlestick chart with indicators"""
+        try:
+            import mplfinance as mpf
+            import matplotlib.pyplot as plt
+            
+            # Prepare data
+            plot_df = df.tail(50).copy()  # Last 50 candles
+            plot_df.index = pd.to_datetime(plot_df['timestamp'])
+            
+            # Style
+            s = mpf.make_mpf_style(base_mpf_style='charles', rc={'font.size': 8})
+            
+            # Add EMAs
+            plots = [
+                mpf.make_addplot(plot_df['ema_9'], color='cyan', width=1),
+                mpf.make_addplot(plot_df['ema_50'], color='orange', width=1),
+                mpf.make_addplot(plot_df['ema_200'], color='white', width=1.5),
+            ]
+            
+            # Save path
+            filename = f"chart_{symbol_name}_{datetime.now().strftime('%H%M%S')}.png"
+            path = os.path.join(os.getcwd(), 'temp_charts')
+            os.makedirs(path, exist_ok=True)
+            full_path = os.path.join(path, filename)
+            
+            # Generate chart
+            mpf.plot(
+                plot_df,
+                type='candle',
+                style=s,
+                addplot=plots,
+                title=f"\n{symbol_name} - 1m Timeframe",
+                volume=True,
+                savefig=dict(fname=full_path, dpi=100, bbox_inches='tight'),
+                block=False
+            )
+            
+            plt.close('all')
+            return full_path
+            
+        except Exception as e:
+            logger.error(f"Error generating chart: {e}")
             return None
     
     async def scan_all(self) -> List[Dict]:

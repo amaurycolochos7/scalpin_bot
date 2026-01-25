@@ -9,6 +9,7 @@ ta>=0.11.0
 python-telegram-bot>=20.0
 
 # Optional: Charts and visualization
+mplfinance>=0.12.9b0
 matplotlib>=3.7.0
 plotly>=5.17.0
 Pillow>=10.0.0

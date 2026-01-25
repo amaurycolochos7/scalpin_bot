@@ -215,46 +215,83 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         else:
             msg += "Señal: *ESPERAR* ▬\n\n"
             
-            msg += "📉 *¿POR QUÉ ESPERAR?*\n"
-            
-            # 1. ML Reason
-            if prob < MLConfig.PROBABILITY_THRESHOLD * 100:
-                msg += f"• 🤖 ML Confianza baja (*{prob:.1f}%* < 90%)\n"
-            else:
-                msg += f"• 🤖 ML Confianza: OK ({prob:.1f}%)\n"
-                
-            # 2. Score Reason
-            score = result['technical_score']
-            if score < MLConfig.TECHNICAL_SCORE_MIN:
-                msg += f"• 📊 Score Técnico bajo (*{score}* < 65)\n"
-            else:
-                msg += f"• 📊 Score Técnico: OK ({score})\n"
-            
-            # 3. Technical Reasons
+            # --- REPORTE TÉCNICO PROFESIONAL ---
             tech = result.get('technical_analysis', {})
-            if tech:
-                trend = tech.get('trend', {})
-                mom = tech.get('momentum', {})
-                vol = tech.get('volume', {})
-                
-                msg += f"• 🌊 Tendencia: *{trend.get('direction', 'N/A')}*\n"
-                msg += f"• 🚀 Momentum: *{mom.get('state', 'N/A')}*\n"
-                msg += f"• 📢 Volumen: *{vol.get('state', 'N/A')}*\n"
-                
-                # Show specific pattern if any
-                patterns = tech.get('patterns', [])
-                if patterns:
-                    msg += f"• 🕯️ Patrón: {patterns[0]}\n"
+            inds = tech.get('indicators', {})
             
-            msg += "\n💡 *Recomendación:*\n"
-            msg += "El mercado no cumple todos los criterios\n"
-            msg += "para una entrada de alta probabilidad.\n"
+            # 1. TENDENCIA
+            trend = tech.get('trend', {})
+            msg += f"📉 *TENDENCIA: {trend.get('direction', 'N/A')}*\n"
+            
+            # EMA Analysis
+            price = result['entry_price']
+            ema200 = inds.get('ema_200')
+            if ema200:
+                rel = "Debajo" if price < ema200 else "Arriba"
+                msg += f"   • Precio vs EMA200: *{rel}*\n"
+            
+            # MACD
+            macd = inds.get('macd')
+            if macd is not None:
+                macd_str = "Negativo" if macd < 0 else "Positivo"
+                msg += f"   • MACD: {macd:.4f} ({macd_str})\n"
+                
+            msg += "\n"
+
+            # 2. MOMENTUM
+            msg += f"🚀 *MOMENTUM*\n"
+            rsi = inds.get('rsi')
+            if rsi:
+                rsi_state = "Sobreventa" if rsi < 30 else "Sobrecompra" if rsi > 70 else "Neutral"
+                msg += f"   • RSI (14): *{rsi:.1f}* ({rsi_state})\n"
+            
+            adx = inds.get('adx')
+            if adx:
+                trend_str = "Fuerte" if adx > 25 else "Débil"
+                msg += f"   • ADX: {adx:.1f} (Tendencia {trend_str})\n"
+                
+            msg += "\n"
+
+            # 3. VOLUMEN & ML
+            vol = tech.get('volume', {})
+            msg += f"📢 *VOLUMEN: {vol.get('state', 'N/A')}*\n"
+            
+            if prob < MLConfig.PROBABILITY_THRESHOLD * 100:
+                msg += f"🤖 *ML:* Confianza baja ({prob:.1f}%)\n"
+            
+            # 4. PATRONES
+            patterns = tech.get('patterns', [])
+            if patterns:
+                msg += f"\n🕯️ *Patrón:* {patterns[0]}\n"
+            
+            msg += "\n💡 *Conclusión:*\n"
+            msg += "No hay setup claro. Esperar confirmación.\n"
         
         msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
         msg += "┗━━━━━━━━━━━━━━━━━━━━"
         
         keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]
-        await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+        
+        # Send chart if available
+        chart_path = result.get('chart_path')
+        if chart_path and os.path.exists(chart_path):
+            try:
+                await loading_msg.delete()  # Delete loading text
+                with open(chart_path, 'rb') as photo:
+                    await msg_obj.reply_photo(
+                        photo=photo,
+                        caption=msg,
+                        parse_mode=ParseMode.MARKDOWN,
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                # Cleanup chart
+                os.remove(chart_path)
+            except Exception as e:
+                logger.error(f"Error sending photo: {e}")
+                # Fallback to text
+                await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         
     except Exception as e:
         logger.error(f"Error analyzing {symbol_name}: {e}", exc_info=True)

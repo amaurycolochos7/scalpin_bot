@@ -70,10 +70,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     msg += "┏━ OPCIONES\n\n"
-    msg += "➣ *Criptomonedas Monitoreadas*\n"
-    msg += "   Ver Top 20 + análisis actual\n\n"
-    msg += "➣ *Analizar Otra Moneda*\n"
-    msg += "   Análisis manual de cualquier cripto\n\n"
+    msg += "➣ *Resumen del Mercado*\n"
+    msg += "   Top 10 alcistas + Top 10 bajistas\n\n"
+    msg += "➣ *Analizar Moneda*\n"
+    msg += "   Escribe símbolo: BTC, ETH, etc.\n\n"
     msg += "┗━━━━━━━━━━━━━━━━━━━━"
     
     if update.message:
@@ -86,13 +86,13 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # VER MONEDAS MONITOREADAS
 # ========================
 async def view_monitored_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Muestra lista de criptomonedas monitoreadas"""
+    """Muestra Top 10 alcistas y Top 10 bajistas"""
     query = update.callback_query if update.callback_query else None
     
     if query:
         await query.answer()
     
-    loading_msg = "┏━ CRIPTOMONEDAS MONITOREADAS\n\n▸ Cargando..."
+    loading_msg = "┏━ ESCANEANDO MERCADO\n\n▸ Analizando criptos...\n▸ Esto puede tomar 1-2 minutos..."
     
     if query:
         await query.edit_message_text(loading_msg, parse_mode=ParseMode.MARKDOWN)
@@ -101,43 +101,92 @@ async def view_monitored_command(update: Update, context: ContextTypes.DEFAULT_T
         msg_obj = await update.message.reply_text(loading_msg, parse_mode=ParseMode.MARKDOWN)
     
     try:
-        # Get monitored symbols
-        status = auto_monitor.get_status()
+        # Get top symbols by volume (analyze top 100 for speed)
+        top_symbols = client.get_top_by_volume(limit=100)
         
-        if not status['monitored_symbols']:
-            msg = "┏━ CRIPTOMONEDAS MONITOREADAS\n\n"
-            msg += "❌ No hay modelos entrenados\n\n"
-            msg += "Ejecuta primero:\n"
-            msg += "  python train_all_models.py\n\n"
-            msg += "┗━━━━━━━━━━━━━━━━━━━━"
-            
-            keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]
-            await msg_obj.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
-            return
+        bullish_list = []
+        bearish_list = []
         
-        msg = "┏━ CRIPTOMONEDAS MONITOREADAS\n\n"
-        msg += f"Total: *{len(status['monitored_symbols'])}* modelos\n"
-        msg += f"Actualización: *Hace {datetime.now().strftime('%H:%M')}*\n\n"
+        # Analyze each symbol
+        for crypto in top_symbols[:50]:  # Limit to 50 for speed
+            try:
+                symbol = crypto['symbol']
+                df = client.get_ohlcv(symbol, '15m', limit=50)
+                
+                if df is None or len(df) < 30:
+                    continue
+                
+                analyzer = TechnicalAnalyzer(df)
+                analyzer.calculate_all_indicators()
+                
+                crossover = analyzer.detect_ma_crossover()
+                tv_votes = analyzer.get_tradingview_votes()
+                
+                symbol_name = symbol.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')
+                
+                result = {
+                    'name': symbol_name,
+                    'signal': crossover['signal'],
+                    'long_votes': tv_votes['long_count'],
+                    'short_votes': tv_votes['short_count']
+                }
+                
+                # Classify by trend
+                if crossover['signal'] in ['LONG', 'LONG_TREND'] and tv_votes['long_count'] >= 5:
+                    result['score'] = tv_votes['long_count']
+                    bullish_list.append(result)
+                elif crossover['signal'] in ['SHORT', 'SHORT_TREND'] and tv_votes['short_count'] >= 5:
+                    result['score'] = tv_votes['short_count']
+                    bearish_list.append(result)
+                    
+            except Exception as e:
+                continue
         
-        # Create buttons for each crypto
-        keyboard = []
-        for i, symbol in enumerate(status['monitored_symbols'][:20], 1):
-            keyboard.append([InlineKeyboardButton(
-                f"📊 {symbol}",
-                callback_data=f"analyze_{symbol}"
-            )])
+        # Sort by score (votes)
+        bullish_list.sort(key=lambda x: x['score'], reverse=True)
+        bearish_list.sort(key=lambda x: x['score'], reverse=True)
         
-        keyboard.append([InlineKeyboardButton("← Inicio", callback_data="menu_inicio")])
+        # Build message
+        msg = "┏━━━━━━━━━━━━━━━━━━━━┓\n"
+        msg += "┃  RESUMEN MERCADO   ┃\n"
+        msg += "┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
         
-        msg += "Selecciona una moneda para\n"
-        msg += "ver su análisis actual:\n\n"
+        # TOP 10 BULLISH
+        msg += "🟢 *TOP 10 ALCISTAS*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        for i, crypto in enumerate(bullish_list[:10], 1):
+            votes = crypto['long_votes']
+            is_cross = "🔥" if crypto['signal'] == 'LONG' else ""
+            msg += f"{i}. {crypto['name']} ({votes}/10) {is_cross}\n"
+        
+        if not bullish_list:
+            msg += "No hay señales alcistas fuertes\n"
+        
+        msg += "\n"
+        
+        # TOP 10 BEARISH
+        msg += "🔴 *TOP 10 BAJISTAS*\n"
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        for i, crypto in enumerate(bearish_list[:10], 1):
+            votes = crypto['short_votes']
+            is_cross = "🔥" if crypto['signal'] == 'SHORT' else ""
+            msg += f"{i}. {crypto['name']} ({votes}/10) {is_cross}\n"
+        
+        if not bearish_list:
+            msg += "No hay señales bajistas fuertes\n"
+        
+        msg += "\n"
+        msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}\n"
+        msg += "🔥 = Cruce reciente\n\n"
         msg += "┗━━━━━━━━━━━━━━━━━━━━"
         
+        keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]
         await msg_obj.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         
     except Exception as e:
         logger.error(f"Error in view_monitored: {e}", exc_info=True)
         await msg_obj.edit_text(f"✗ Error: {str(e)}", parse_mode=ParseMode.MARKDOWN)
+
 
 
 # ========================

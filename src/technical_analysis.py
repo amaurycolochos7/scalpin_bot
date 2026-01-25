@@ -694,6 +694,123 @@ class TechnicalAnalyzer:
         
         return patterns, score
     
+    def detect_candle_color_trend(self, lookback: int = 6) -> dict:
+        """
+        Detecta cambio de tendencia basado en el color de las velas.
+        
+        La regla: Más de 3 velas consecutivas del mismo color 
+        DESPUÉS de velas del color opuesto = confirmación de cambio de tendencia.
+        
+        Args:
+            lookback: Número de velas a analizar (default 6)
+        
+        Returns:
+            dict con:
+            - trend_change: 'BULLISH', 'BEARISH', o 'NONE'
+            - consecutive_green: número de velas verdes consecutivas recientes
+            - consecutive_red: número de velas rojas consecutivas recientes
+            - candle_colors: lista visual de colores recientes (🟢/🔴)
+            - description: explicación del patrón detectado
+            - confirmed: True si hay 3+ velas del mismo color
+        """
+        if len(self.df) < lookback:
+            return {
+                'trend_change': 'NONE',
+                'consecutive_green': 0,
+                'consecutive_red': 0,
+                'candle_colors': '',
+                'description': 'Datos insuficientes',
+                'confirmed': False
+            }
+        
+        # Obtener las últimas N velas
+        recent_candles = self.df.iloc[-lookback:]
+        
+        # Determinar color de cada vela (verde = close > open, roja = close < open)
+        colors = []
+        for _, candle in recent_candles.iterrows():
+            if candle['close'] > candle['open']:
+                colors.append('green')
+            elif candle['close'] < candle['open']:
+                colors.append('red')
+            else:
+                colors.append('neutral')
+        
+        # Generar representación visual
+        color_visual = ''
+        for c in colors:
+            if c == 'green':
+                color_visual += '🟢'
+            elif c == 'red':
+                color_visual += '🔴'
+            else:
+                color_visual += '⚪'
+        
+        # Contar velas consecutivas del mismo color (desde la más reciente)
+        consecutive_green = 0
+        consecutive_red = 0
+        
+        # Contar verdes consecutivas desde el final
+        for c in reversed(colors):
+            if c == 'green':
+                consecutive_green += 1
+            else:
+                break
+        
+        # Si no hay verdes, contar rojas consecutivas desde el final
+        if consecutive_green == 0:
+            for c in reversed(colors):
+                if c == 'red':
+                    consecutive_red += 1
+                else:
+                    break
+        
+        # Detectar cambio de tendencia (3+ velas del mismo color)
+        trend_change = 'NONE'
+        confirmed = False
+        description = 'Sin confirmación de cambio'
+        
+        if consecutive_green >= 3:
+            # Verificar si hubo velas rojas antes (cambio de tendencia)
+            had_red_before = any(c == 'red' for c in colors[:-consecutive_green])
+            if had_red_before:
+                trend_change = 'BULLISH'
+                confirmed = True
+                description = f'✅ {consecutive_green} velas VERDES → Cambio a ALCISTA'
+            else:
+                trend_change = 'BULLISH'
+                confirmed = True
+                description = f'📈 {consecutive_green} velas VERDES consecutivas'
+        
+        elif consecutive_red >= 3:
+            # Verificar si hubo velas verdes antes (cambio de tendencia)
+            had_green_before = any(c == 'green' for c in colors[:-consecutive_red])
+            if had_green_before:
+                trend_change = 'BEARISH'
+                confirmed = True
+                description = f'✅ {consecutive_red} velas ROJAS → Cambio a BAJISTA'
+            else:
+                trend_change = 'BEARISH'
+                confirmed = True
+                description = f'📉 {consecutive_red} velas ROJAS consecutivas'
+        
+        else:
+            if consecutive_green > 0:
+                description = f'{consecutive_green} vela(s) verde(s) - esperando confirmación'
+            elif consecutive_red > 0:
+                description = f'{consecutive_red} vela(s) roja(s) - esperando confirmación'
+            else:
+                description = 'Tendencia mixta - ESPERAR'
+        
+        return {
+            'trend_change': trend_change,
+            'consecutive_green': consecutive_green,
+            'consecutive_red': consecutive_red,
+            'candle_colors': color_visual,
+            'description': description,
+            'confirmed': confirmed
+        }
+    
     def generate_analysis(self) -> Dict:
         """
         Generate complete technical analysis with scoring system

@@ -92,8 +92,8 @@ class AutoMonitor:
             # Current price
             current_price = df['close'].iloc[-1]
             
-            # Get symbol name for display
-            symbol_name = symbol.replace('/USDT:USDT', '').replace('/USDT', '')
+            # Get symbol name for display (add USDT for futures)
+            symbol_name = symbol.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')
             
             # Check for trading signal
             ma_signal = crossover['signal']

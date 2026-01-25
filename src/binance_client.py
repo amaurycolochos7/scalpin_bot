@@ -39,7 +39,7 @@ class BinanceClient:
                 print(f"⚠ Warning: Could not load private markets (region restricted): {str(e)[:100]}")
                 print("OK - Conectado a Binance Futures (solo funciones publicas)")
             else:
-                print(f"✅ Connected to {config.EXCHANGE.upper()}")
+                print(f"OK - Connected to {config.EXCHANGE.upper()}")
             
         except Exception as e:
             print(f"ERROR: Failed to connect to Binance: {str(e)}")

@@ -57,7 +57,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if status['is_running']:
         msg += f"🟢 *Estado:* ACTIVO\n"
         msg += f"📊 *Monitoreando:* {status['monitored_count']} criptos\n"
-        msg += f"⏱️ *Escaneo:* Cada 5 minutos\n\n"
+        msg += f"⏱️ *Escaneo:* Cada 60 segundos\n\n"
     else:
         msg += f"🔴 *Estado:* INICIALIZANDO...\n\n"
     

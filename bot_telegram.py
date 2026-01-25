@@ -52,18 +52,19 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = auto_monitor.get_status() if auto_monitor else {'is_running': False, 'monitored_count': 0}
     
     msg = "┏━━━━━━━━━━━━━━━━━━━━┓\n"
-    msg += "┃  SCALPING BOT ML   ┃\n"
+    msg += "┃  TRADING BOT MA7   ┃\n"
     msg += "┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
     
-    msg += "Monitoreo automático 24/7\n"
-    msg += "Top 20 en Futuros Binance\n\n"
+    msg += "Estrategia: MA7/MA25 + 10 Indicadores\n"
+    msg += "Todas las criptos de Binance Futures\n\n"
     
     if status['is_running']:
         msg += f"🟢 *Estado:* ACTIVO\n"
         msg += f"📊 *Monitoreando:* {status['monitored_count']} criptos\n"
-        msg += f"⏱️ *Escaneo:* Cada 60 segundos\n\n"
+        msg += f"⏱️ *Escaneo:* Cada 5 minutos\n\n"
     else:
         msg += f"🔴 *Estado:* INICIALIZANDO...\n\n"
+
     
     msg += "┏━ OPCIONES\n\n"
     msg += "➣ *Criptomonedas Monitoreadas*\n"

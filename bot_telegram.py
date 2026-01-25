@@ -1,6 +1,7 @@
 """
 Scalping Bot ML - Auto-Monitor Version
 Simplified 2-button interface with automatic 24/7 monitoring
+Uses MA7/MA25 crossover strategy with TradingView 10-indicator confirmation
 """
 import asyncio
 import logging
@@ -14,6 +15,8 @@ from src.config import config
 from src.binance_client import get_client
 from src.auto_monitor import AutoMonitor
 from src.ml_config import MLConfig
+from src.mtf_analysis import MultiTimeframeAnalyzer, format_mtf_analysis
+from src.technical_analysis import TechnicalAnalyzer
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Global
 client = None
 auto_monitor = None
+mtf_analyzer = None
 
 
 def format_price(price: float) -> str:
@@ -136,7 +140,9 @@ async def view_monitored_command(update: Update, context: ContextTypes.DEFAULT_T
 # ANALIZAR MONEDA
 # ========================
 async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_TYPE, symbol_name: str = None):
-    """Analiza una crip tomoneda específica"""
+    """Analiza una criptomoneda usando estrategia MA7/MA25 + 10 indicadores TradingView"""
+    global mtf_analyzer
+    
     query = update.callback_query if update.callback_query else None
     
     if query:
@@ -171,133 +177,129 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
     # Loading message
     loading_msg = await msg_obj.reply_text(
         f"┏━ Analizando {display}\n\n"
-        f"▸ Calculando features...\n"
-        f"▸ Prediciendo con ML...",
+        f"▸ Obteniendo datos 15m...\n"
+        f"▸ Calculando MA7/MA25...\n"
+        f"▸ Votando con 10 indicadores...",
         parse_mode=ParseMode.MARKDOWN
     )
     
     try:
-        # Analyze using auto_monitor
-        symbol_info = {
-            'symbol': symbol,
-            'name': symbol_name,
-            'model_path': os.path.join(MLConfig.MODEL_DIR, symbol_name)
+        # Initialize MTF analyzer if needed
+        if mtf_analyzer is None:
+            mtf_analyzer = MultiTimeframeAnalyzer(client)
+        
+        # Analyze using new MA7/MA25 strategy
+        mtf_result = mtf_analyzer.analyze(symbol)
+        
+        # Get current price for strategy levels
+        price = mtf_result.price
+        
+        # Calculate entry/exit levels based on ATR or simple percentage
+        if mtf_result.trade_direction == 'LONG':
+            entry = price
+            sl = price * 0.98  # 2% stop loss
+            tp1 = price * 1.04  # 4% take profit
+        elif mtf_result.trade_direction == 'SHORT':
+            entry = price
+            sl = price * 1.02  # 2% stop loss
+            tp1 = price * 0.96  # 4% take profit
+        else:
+            entry = price
+            sl = price * 0.98
+            tp1 = price * 1.02
+        
+        strategy = {
+            'entry': entry,
+            'sl': sl,
+            'tp1': tp1
         }
         
-        result = await auto_monitor.analyze_single(symbol_info)
-        
-        if not result:
-            await loading_msg.edit_text(f"✗ Error al analizar {display}", parse_mode=ParseMode.MARKDOWN)
-            return
-        
-        # Format message
-        prob = result['ml_probability']
-        prob_emoji = "✅✅" if prob >= 97 else "✅" if prob >= 95 else "⚠️"
-        
+        # Format message using new format
         msg = f"┏━━━━━━━━━━━━━━━━━━━━┓\n"
         msg += f"┃   {display:^14}   ┃\n"
         msg += f"┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
         
-        msg += f"Precio: {format_price(result['entry_price'])}\n\n"
+        msg += f"💰 Precio: {format_price(price)}\n\n"
         
-        msg += f"┏━ PREDICCIÓN ML\n\n"
-        msg += f"Probabilidad: *{prob:.1f}%* {prob_emoji}\n"
-        msg += f"Score Técnico: {result['technical_score']}/100\n\n"
+        # MA7/MA25 STATUS
+        msg += "━━━ MA7/MA25 (15m) ━━━\n"
+        msg += f"{mtf_result.ma_crossover['description']}\n"
+        msg += f"MA7: {format_price(mtf_result.ma_crossover['ma7'])}\n"
+        msg += f"MA25: {format_price(mtf_result.ma_crossover['ma25'])}\n\n"
         
-        if result['signal']:
-            action = "COMPRAR ▲" if result['signal'] == 'LONG' else "VENDER ▼"
-            msg += f"Señal: *{action}*\n\n"
+        # TRADINGVIEW INDICATORS (10 votes)
+        msg += "━━━ Indicadores TradingView ━━━\n"
+        long_votes = mtf_result.tv_votes['long_count']
+        short_votes = mtf_result.tv_votes['short_count']
+        neutral = mtf_result.tv_votes['neutral_count']
+        
+        # Visual vote bar
+        bar_long = "🟢" * long_votes
+        bar_short = "🔴" * short_votes
+        
+        msg += f"LONG: {long_votes}  {bar_long}\n"
+        msg += f"SHORT: {short_votes}  {bar_short}\n\n"
+        
+        # Individual votes breakdown (compact)
+        msg += "Detalle:\n"
+        for name, vote_data in mtf_result.tv_votes['votes'].items():
+            vote = vote_data['vote']
+            if vote > 0:
+                icon = "🟢"
+            elif vote < 0:
+                icon = "🔴"
+            else:
+                icon = "⚪"
+            msg += f"  {icon} {name}\n"
+        msg += "\n"
+        
+        # MAIN SIGNAL
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        if mtf_result.should_trade:
+            if mtf_result.trade_direction == "LONG":
+                msg += "┏━ SEÑAL: COMPRA ▲\n\n"
+            else:
+                msg += "┏━ SEÑAL: VENTA ▼\n\n"
             
-            msg += "Niveles:\n"
-            msg += f"  Entry → {format_price(result['entry_price'])}\n"
-            msg += f"  TP    → {format_price(result['tp_price'])} (+{result['tp_percent']:.1f}%)\n"
-            msg += f"  SL    → {format_price(result['sl_price'])} (-{result['sl_percent']:.1f}%)\n\n"
+            msg += f"Confianza: {mtf_result.confidence}% ({long_votes if mtf_result.trade_direction == 'LONG' else short_votes}/10)\n"
+            msg += f"Razón: {mtf_result.reason}\n\n"
+            
+            # Entry/exit levels
+            msg += "📊 Niveles:\n"
+            msg += f"  Entrada → {format_price(entry)}\n"
+            msg += f"  Stop    → {format_price(sl)}\n"
+            msg += f"  Target  → {format_price(tp1)}\n\n"
         else:
-            msg += "Señal: *ESPERAR* ▬\n\n"
-            
-            # --- REPORTE TÉCNICO PROFESIONAL ---
-            tech = result.get('technical_analysis', {})
-            inds = tech.get('indicators', {})
-            
-            # 1. TENDENCIA
-            trend = tech.get('trend', {})
-            msg += f"📉 *TENDENCIA: {trend.get('direction', 'N/A')}*\n"
-            
-            # EMA Analysis
-            price = result['entry_price']
-            ema200 = inds.get('ema_200')
-            if ema200:
-                rel = "Debajo" if price < ema200 else "Arriba"
-                msg += f"   • Precio vs EMA200: *{rel}*\n"
-            
-            # MACD
-            macd = inds.get('macd')
-            if macd is not None:
-                macd_str = "Negativo" if macd < 0 else "Positivo"
-                msg += f"   • MACD: {macd:.4f} ({macd_str})\n"
-                
-            msg += "\n"
-
-            # 2. MOMENTUM
-            msg += f"🚀 *MOMENTUM*\n"
-            rsi = inds.get('rsi')
-            if rsi:
-                rsi_state = "Sobreventa" if rsi < 30 else "Sobrecompra" if rsi > 70 else "Neutral"
-                msg += f"   • RSI (14): *{rsi:.1f}* ({rsi_state})\n"
-            
-            adx = inds.get('adx')
-            if adx:
-                trend_str = "Fuerte" if adx > 25 else "Débil"
-                msg += f"   • ADX: {adx:.1f} (Tendencia {trend_str})\n"
-                
-            msg += "\n"
-
-            # 3. VOLUMEN & ML
-            vol = tech.get('volume', {})
-            msg += f"📢 *VOLUMEN: {vol.get('state', 'N/A')}*\n"
-            
-            if prob < MLConfig.PROBABILITY_THRESHOLD * 100:
-                msg += f"🤖 *ML:* Confianza baja ({prob:.1f}%)\n"
-            
-            # 4. PATRONES
-            patterns = tech.get('patterns', [])
-            if patterns:
-                msg += f"\n🕯️ *Patrón:* {patterns[0]}\n"
-            
-            msg += "\n💡 *Conclusión:*\n"
-            msg += "No hay setup claro. Esperar confirmación.\n"
+            msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
+            msg += f"{mtf_result.reason}\n\n"
         
-        msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
+        # Warnings
+        if mtf_result.warnings:
+            msg += "⚠️ Advertencias:\n"
+            for w in mtf_result.warnings:
+                msg += f"  {w}\n"
+            msg += "\n"
+        
+        # Higher timeframe context
+        msg += "━━━ Contexto ━━━\n"
+        if mtf_result.tf_1h:
+            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_1h.trend else ("▼" if "BAJISTA" in mtf_result.tf_1h.trend else "▬")
+            msg += f"  1H: {trend_icon} {mtf_result.tf_1h.trend}\n"
+        if mtf_result.tf_4h:
+            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_4h.trend else ("▼" if "BAJISTA" in mtf_result.tf_4h.trend else "▬")
+            msg += f"  4H: {trend_icon} {mtf_result.tf_4h.trend}\n"
+        
+        msg += f"\n⏰ {datetime.now().strftime('%H:%M:%S')}\n"
         msg += "┗━━━━━━━━━━━━━━━━━━━━"
         
         keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]
-        
-        # Send chart if available
-        chart_path = result.get('chart_path')
-        if chart_path and os.path.exists(chart_path):
-            try:
-                await loading_msg.delete()  # Delete loading text
-                with open(chart_path, 'rb') as photo:
-                    await msg_obj.reply_photo(
-                        photo=photo,
-                        caption=msg,
-                        parse_mode=ParseMode.MARKDOWN,
-                        reply_markup=InlineKeyboardMarkup(keyboard)
-                    )
-                # Cleanup chart
-                os.remove(chart_path)
-            except Exception as e:
-                logger.error(f"Error sending photo: {e}")
-                # Fallback to text
-                await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
-        else:
-            await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+        await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
         
     except Exception as e:
         logger.error(f"Error analyzing {symbol_name}: {e}", exc_info=True)
         await loading_msg.edit_text(
             f"✗ Error: {str(e)}\n\n"
-            f"Puede que {symbol_name} no tenga modelo entrenado.",
+            f"Intenta de nuevo.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -354,7 +356,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # ========================
 def main():
-    global client, auto_monitor
+    global client, auto_monitor, mtf_analyzer
     
     if not config.TELEGRAM_BOT_TOKEN or 'your_' in config.TELEGRAM_BOT_TOKEN:
         print("ERROR: TELEGRAM_BOT_TOKEN no configurado")
@@ -363,7 +365,9 @@ def main():
     print("Conectando a Binance...")
     try:
         client = get_client()
+        mtf_analyzer = MultiTimeframeAnalyzer(client)
         print(f"✅ Conectado a Binance")
+        print(f"✅ Estrategia MA7/MA25 + 10 indicadores lista")
         
     except Exception as e:
         print(f"ERROR: {e}")

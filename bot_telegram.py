@@ -213,8 +213,42 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"  TP    → {format_price(result['tp_price'])} (+{result['tp_percent']:.1f}%)\n"
             msg += f"  SL    → {format_price(result['sl_price'])} (-{result['sl_percent']:.1f}%)\n\n"
         else:
-            msg += "Señal: *ESPERAR* ▬\n"
-            msg += f"(Probabilidad < {MLConfig.PROBABILITY_THRESHOLD*100:.0f}%)\n\n"
+            msg += "Señal: *ESPERAR* ▬\n\n"
+            
+            msg += "📉 *¿POR QUÉ ESPERAR?*\n"
+            
+            # 1. ML Reason
+            if prob < MLConfig.PROBABILITY_THRESHOLD * 100:
+                msg += f"• 🤖 ML Confianza baja (*{prob:.1f}%* < 90%)\n"
+            else:
+                msg += f"• 🤖 ML Confianza: OK ({prob:.1f}%)\n"
+                
+            # 2. Score Reason
+            score = result['technical_score']
+            if score < MLConfig.TECHNICAL_SCORE_MIN:
+                msg += f"• 📊 Score Técnico bajo (*{score}* < 65)\n"
+            else:
+                msg += f"• 📊 Score Técnico: OK ({score})\n"
+            
+            # 3. Technical Reasons
+            tech = result.get('technical_analysis', {})
+            if tech:
+                trend = tech.get('trend', {})
+                mom = tech.get('momentum', {})
+                vol = tech.get('volume', {})
+                
+                msg += f"• 🌊 Tendencia: *{trend.get('direction', 'N/A')}*\n"
+                msg += f"• 🚀 Momentum: *{mom.get('state', 'N/A')}*\n"
+                msg += f"• 📢 Volumen: *{vol.get('state', 'N/A')}*\n"
+                
+                # Show specific pattern if any
+                patterns = tech.get('patterns', [])
+                if patterns:
+                    msg += f"• 🕯️ Patrón: {patterns[0]}\n"
+            
+            msg += "\n💡 *Recomendación:*\n"
+            msg += "El mercado no cumple todos los criterios\n"
+            msg += "para una entrada de alta probabilidad.\n"
         
         msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
         msg += "┗━━━━━━━━━━━━━━━━━━━━"

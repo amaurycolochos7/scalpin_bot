@@ -175,6 +175,7 @@ class AutoMonitor:
                 'sl_price': sl_price,
                 'tp_percent': tp_percent if signal_type else None,
                 'sl_percent': sl_percent if signal_type else None,
+                'technical_analysis': tech_analysis,  # Include full analysis details
                 'timestamp': datetime.now().isoformat()
             }
             

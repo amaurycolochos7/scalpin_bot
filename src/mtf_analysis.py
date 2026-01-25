@@ -1,6 +1,8 @@
 """
-Multi-Timeframe (MTF) Analysis Module - SIMPLIFIED VERSION
-Analyzes multiple timeframes and combines them for better signals
+Multi-Timeframe (MTF) Analysis Module - MA7/MA25 STRATEGY
+Based on friend's trading strategy:
+- Primary signal: MA7/MA25 crossover on 15-minute timeframe
+- Confirmation: TradingView 10 indicators (7/10 rule)
 """
 
 from dataclasses import dataclass
@@ -16,224 +18,237 @@ class TimeframeData:
     timeframe: str
     score: float
     signal: SignalType
-    trend: str  # Using string instead of TrendDirection
+    trend: str
     rsi: float
     macd_bullish: bool
     volume_ok: bool
+    ma7: float
+    ma25: float
 
 
 @dataclass
 class MTFAnalysis:
-    """Results of multi-timeframe analysis"""
+    """Results of multi-timeframe analysis with MA7/MA25 strategy"""
     symbol: str
     price: float
-    tf_1d: Optional[TimeframeData]
-    tf_4h: Optional[TimeframeData]
-    tf_1h: Optional[TimeframeData]  # Keep for compatibility
+    
+    # Timeframe data
     tf_15m: Optional[TimeframeData]
-    tf_5m: Optional[TimeframeData]  # Keep for compatibility
-    overall_score: float
-    trend_alignment: float
-    confidence: float
-    volatility_ok: bool
-    volatility_state: str
+    tf_1h: Optional[TimeframeData]
+    tf_4h: Optional[TimeframeData]
+    
+    # MA7/MA25 Crossover (PRIMARY SIGNAL)
+    ma_crossover: dict
+    
+    # TradingView 10 Indicators (CONFIRMATION)
+    tv_votes: dict
+    
+    # Final Decision
     should_trade: bool
-    trade_direction: str
+    trade_direction: str  # 'LONG', 'SHORT', or 'NEUTRAL'
+    confidence: int  # Percentage based on indicator votes
     reason: str
     warnings: List[str]
 
 
 class MultiTimeframeAnalyzer:
-    """Analyzes crypto across multiple timeframes"""
+    """Analyzes crypto using MA7/MA25 crossover strategy with TradingView confirmation"""
     
     def __init__(self, client):
         self.client = client
-        
-        # Timeframe weights (adjust these to change importance)
-        self.tf_weights = {
-            '1d': 0.25,   # 25% - Long term trend
-            '4h': 0.25,   # 25% - Medium term confirmation
-            '1h': 0.20,   # 20% - Short term trend
-            '15m': 0.15,  # 15% - Entry timing
-            '5m': 0.15    # 15% - Precise entry
-        }
+        # Primary timeframe is 15 minutes (as friend recommended)
+        self.primary_tf = '15m'
     
     def analyze(self, symbol: str) -> MTFAnalysis:
-        """Analyze symbol across all timeframes"""
+        """
+        Analyze symbol using MA7/MA25 strategy
         
-        # Analyze each timeframe (REDUCED TO 3 FOR SPEED)
-        tf_results = {}
-        analyzers = {}
+        Strategy:
+        1. Get MA7/MA25 crossover on 15m timeframe (PRIMARY SIGNAL)
+        2. Get TradingView 10-indicator votes (CONFIRMATION)
+        3. If crossover + 7/10 indicators agree = TRADE
+        """
         
-        for tf in ['1d', '4h', '15m']:  # Only 3 timeframes instead of 5
-            try:
-                # Get OHLCV data for this timeframe
-                df = self.client.get_ohlcv(symbol, tf)
-                
-                # Create analyzer with DataFrame
-                analyzer = TechnicalAnalyzer(df)
-                analysis = analyzer.generate_analysis()
-                
-                tf_results[tf] = TimeframeData(
-                    timeframe=tf,
-                    score=analysis['score'],
-                    signal=analysis['signal'],
-                    trend=analysis['trend']['direction'],  # Get string from trend dict
-                    rsi=analysis['indicators']['rsi'] if analysis['indicators']['rsi'] else 50,
-                    macd_bullish=analysis['indicators']['macd'] > 0 if analysis['indicators']['macd'] else False,
-                    volume_ok=analysis['indicators']['volume_ratio'] > 1.0 if analysis['indicators']['volume_ratio'] else True
-                )
-                analyzers[tf] = analyzer
-                
-            except Exception as e:
-                print(f"Error analyzing {tf}: {str(e)}")
-                tf_results[tf] = None
+        # Get data for 15m (primary) timeframe
+        df_15m = self.client.get_ohlcv(symbol, '15m')
+        analyzer_15m = TechnicalAnalyzer(df_15m)
+        analyzer_15m.calculate_all_indicators()
+        
+        # Get MA7/MA25 crossover (PRIMARY SIGNAL)
+        ma_crossover = analyzer_15m.detect_ma_crossover()
+        
+        # Get TradingView 10-indicator votes (CONFIRMATION)
+        tv_votes = analyzer_15m.get_tradingview_votes()
+        
+        # Get analysis data for display
+        analysis_15m = analyzer_15m.generate_analysis()
+        
+        tf_15m_data = TimeframeData(
+            timeframe='15m',
+            score=analysis_15m['score'],
+            signal=analysis_15m['signal'],
+            trend=analysis_15m['trend']['direction'],
+            rsi=analysis_15m['indicators']['rsi'] if analysis_15m['indicators']['rsi'] else 50,
+            macd_bullish=analysis_15m['indicators']['macd'] > 0 if analysis_15m['indicators']['macd'] else False,
+            volume_ok=analysis_15m['indicators']['volume_ratio'] > 1.0 if analysis_15m['indicators']['volume_ratio'] else True,
+            ma7=ma_crossover['ma7'],
+            ma25=ma_crossover['ma25']
+        )
+        
+        # Get 1h and 4h for additional context (optional)
+        tf_1h_data = None
+        tf_4h_data = None
+        
+        try:
+            df_1h = self.client.get_ohlcv(symbol, '1h')
+            analyzer_1h = TechnicalAnalyzer(df_1h)
+            analyzer_1h.calculate_all_indicators()
+            ma_1h = analyzer_1h.detect_ma_crossover()
+            analysis_1h = analyzer_1h.generate_analysis()
+            tf_1h_data = TimeframeData(
+                timeframe='1h',
+                score=analysis_1h['score'],
+                signal=analysis_1h['signal'],
+                trend=analysis_1h['trend']['direction'],
+                rsi=analysis_1h['indicators']['rsi'] if analysis_1h['indicators']['rsi'] else 50,
+                macd_bullish=analysis_1h['indicators']['macd'] > 0 if analysis_1h['indicators']['macd'] else False,
+                volume_ok=True,
+                ma7=ma_1h['ma7'],
+                ma25=ma_1h['ma25']
+            )
+        except:
+            pass
+        
+        try:
+            df_4h = self.client.get_ohlcv(symbol, '4h')
+            analyzer_4h = TechnicalAnalyzer(df_4h)
+            analyzer_4h.calculate_all_indicators()
+            ma_4h = analyzer_4h.detect_ma_crossover()
+            analysis_4h = analyzer_4h.generate_analysis()
+            tf_4h_data = TimeframeData(
+                timeframe='4h',
+                score=analysis_4h['score'],
+                signal=analysis_4h['signal'],
+                trend=analysis_4h['trend']['direction'],
+                rsi=analysis_4h['indicators']['rsi'] if analysis_4h['indicators']['rsi'] else 50,
+                macd_bullish=analysis_4h['indicators']['macd'] > 0 if analysis_4h['indicators']['macd'] else False,
+                volume_ok=True,
+                ma7=ma_4h['ma7'],
+                ma25=ma_4h['ma25']
+            )
+        except:
+            pass
         
         # Get current price
         ticker = self.client.get_ticker(symbol)
         current_price = ticker['price']
         
-        # Calculate overall metrics
-        overall_score = self._calculate_overall_score(tf_results)
-        trend_alignment = self._calculate_trend_alignment(tf_results)
-        confidence = self._calculate_confidence(tf_results, overall_score, trend_alignment)
-        
-        # Volatility check
-        volatility_ok, volatility_state = self._check_volatility(tf_results)
-        
-        # Trading decision
-        should_trade, direction, reason = self._make_decision(
-            overall_score, trend_alignment, confidence, volatility_ok
+        # Make trading decision
+        should_trade, direction, confidence, reason = self._make_decision(
+            ma_crossover, tv_votes, tf_1h_data, tf_4h_data
         )
         
         # Collect warnings
-        warnings = self._collect_warnings(tf_results, volatility_ok)
+        warnings = self._collect_warnings(ma_crossover, tv_votes, tf_1h_data, tf_4h_data)
         
         return MTFAnalysis(
             symbol=symbol,
             price=current_price,
-            tf_1d=tf_results.get('1d'),
-            tf_4h=tf_results.get('4h'),
-            tf_1h=None,  # Not analyzed for speed
-            tf_15m=tf_results.get('15m'),
-            tf_5m=None,  # Not analyzed for speed
-            overall_score=overall_score,
-            trend_alignment=trend_alignment,
-            confidence=confidence,
-            volatility_ok=volatility_ok,
-            volatility_state=volatility_state,
+            tf_15m=tf_15m_data,
+            tf_1h=tf_1h_data,
+            tf_4h=tf_4h_data,
+            ma_crossover=ma_crossover,
+            tv_votes=tv_votes,
             should_trade=should_trade,
             trade_direction=direction,
+            confidence=confidence,
             reason=reason,
             warnings=warnings
         )
     
-    def _calculate_overall_score(self, tf_results: Dict) -> float:
-        """Calculate weighted average score across timeframes"""
-        total_score = 0
-        total_weight = 0
+    def _make_decision(self, ma_crossover: dict, tv_votes: dict, 
+                       tf_1h: Optional[TimeframeData], tf_4h: Optional[TimeframeData]) -> tuple:
+        """
+        Make trading decision based on:
+        1. MA7/MA25 crossover (primary)
+        2. TradingView 10-indicator votes (confirmation with 7/10 rule)
+        3. Higher timeframe alignment (bonus)
+        """
         
-        for tf, weight in self.tf_weights.items():
-            if tf_results.get(tf):
-                total_score += tf_results[tf].score * weight
-                total_weight += weight
+        ma_signal = ma_crossover['signal']
+        tv_signal = tv_votes['signal']
+        long_votes = tv_votes['long_count']
+        short_votes = tv_votes['short_count']
         
-        return (total_score / total_weight) if total_weight > 0 else 50
+        # Calculate confidence based on votes
+        max_votes = max(long_votes, short_votes)
+        confidence = int((max_votes / 10) * 100)
+        
+        # CASE 1: Fresh crossover detected (strongest signal)
+        if ma_signal == 'LONG':
+            if long_votes >= 6:  # 6/10 or more confirms
+                return True, 'LONG', confidence, f'🟢 CRUCE ALCISTA + {long_votes}/10 indicadores confirman'
+            else:
+                return True, 'LONG', confidence, f'🟢 CRUCE ALCISTA (solo {long_votes}/10 confirman)'
+        
+        if ma_signal == 'SHORT':
+            if short_votes >= 6:  # 6/10 or more confirms
+                return True, 'SHORT', confidence, f'🔴 CRUCE BAJISTA + {short_votes}/10 indicadores confirman'
+            else:
+                return True, 'SHORT', confidence, f'🔴 CRUCE BAJISTA (solo {short_votes}/10 confirman)'
+        
+        # CASE 2: In existing trend (MA7 above/below MA25)
+        if ma_signal == 'LONG_TREND':
+            if long_votes >= 7:  # 7/10 rule
+                return True, 'LONG', confidence, f'📈 Tendencia ALCISTA + {long_votes}/10 indicadores'
+            elif long_votes >= 5:
+                return False, 'LONG', confidence, f'📈 Tendencia alcista pero solo {long_votes}/10'
+            else:
+                return False, 'NEUTRAL', confidence, f'Tendencia mixta ({long_votes} LONG vs {short_votes} SHORT)'
+        
+        if ma_signal == 'SHORT_TREND':
+            if short_votes >= 7:  # 7/10 rule
+                return True, 'SHORT', confidence, f'📉 Tendencia BAJISTA + {short_votes}/10 indicadores'
+            elif short_votes >= 5:
+                return False, 'SHORT', confidence, f'📉 Tendencia bajista pero solo {short_votes}/10'
+            else:
+                return False, 'NEUTRAL', confidence, f'Tendencia mixta ({long_votes} LONG vs {short_votes} SHORT)'
+        
+        # CASE 3: No clear signal
+        return False, 'NEUTRAL', confidence, 'Sin señal clara - ESPERAR'
     
-    def _calculate_trend_alignment(self, tf_results: Dict) -> float:
-        """Calculate how aligned the trends are"""
-        trends = []
-        for tf_data in tf_results.values():
-            if tf_data:
-                if "ALCISTA" in tf_data.trend or "BULLISH" in tf_data.trend:
-                    trends.append(1)
-                elif "BAJISTA" in tf_data.trend or "BEARISH" in tf_data.trend:
-                    trends.append(-1)
-                else:
-                    trends.append(0)
-        
-        if not trends:
-            return 0
-        
-        # Perfect alignment = all same direction
-        avg_trend = sum(trends) / len(trends)
-        alignment = abs(avg_trend) * 100
-        
-        return alignment
-    
-    def _calculate_confidence(self, tf_results: Dict, score: float, alignment: float) -> float:
-        """Calculate confidence level"""
-        # Base confidence on score
-        confidence = score
-        
-        # Boost for good alignment
-        if alignment > 70:
-            confidence += 10
-        elif alignment > 50:
-            confidence += 5
-        
-        # Reduce for poor alignment
-        if alignment < 30:
-            confidence -= 15
-        
-        # Cap at 100
-        return min(100, max(0, confidence))
-    
-    def _check_volatility(self, tf_results: Dict) -> tuple:
-        """Check volatility state"""
-        # Use ATR from 1H timeframe as reference
-        if tf_results.get('1h'):
-            # Simple volatility check (can be improved)
-            return True, "Normal"
-        return True, "Unknown"
-    
-    def _make_decision(self, score: float, alignment: float, confidence: float, volatility_ok: bool) -> tuple:
-        """Make trading decision"""
-        
-        # Minimum thresholds
-        MIN_SCORE = 55
-        MIN_ALIGNMENT = 40
-        MIN_CONFIDENCE = 50
-        
-        # No trade conditions
-        if score < MIN_SCORE:
-            return False, "NEUTRAL", f"Score muy bajo ({score:.0f}/100)"
-        
-        if alignment < MIN_ALIGNMENT:
-            return False, "NEUTRAL", f"Timeframes desalineados ({alignment:.0f}%)"
-        
-        if confidence < MIN_CONFIDENCE:
-            return False, "NEUTRAL", f"Confianza baja ({confidence:.0f}%)"
-        
-        # Determine direction
-        if score > 55:
-            return True, "LONG", f"Señal alcista confirmada"
-        elif score < 45:
-            return True, "SHORT", f"Señal bajista confirmada"
-        
-        return False, "NEUTRAL", "Señal neutral, esperar"
-    
-    def _collect_warnings(self, tf_results: Dict, volatility_ok: bool) -> List[str]:
-        """Collect any warnings"""
+    def _collect_warnings(self, ma_crossover: dict, tv_votes: dict,
+                          tf_1h: Optional[TimeframeData], tf_4h: Optional[TimeframeData]) -> List[str]:
+        """Collect warnings for the user"""
         warnings = []
         
-        # Check for conflicting signals
-        bullish_count = sum(1 for tf in tf_results.values() 
-                           if tf and ("BULLISH" in tf.trend or "ALCISTA" in tf.trend))
-        bearish_count = sum(1 for tf in tf_results.values() 
-                           if tf and ("BEARISH" in tf.trend or "BAJISTA" in tf.trend))
+        # Check if higher timeframes disagree
+        ma_signal = ma_crossover['signal']
         
-        if bullish_count > 0 and bearish_count > 0:
-            warnings.append("Señales mixtas en diferentes timeframes")
+        if tf_1h and tf_4h:
+            # Check 1h alignment
+            if 'LONG' in ma_signal and 'BAJISTA' in tf_1h.trend:
+                warnings.append("⚠️ 1H muestra tendencia BAJISTA")
+            elif 'SHORT' in ma_signal and 'ALCISTA' in tf_1h.trend:
+                warnings.append("⚠️ 1H muestra tendencia ALCISTA")
+            
+            # Check 4h alignment
+            if 'LONG' in ma_signal and 'BAJISTA' in tf_4h.trend:
+                warnings.append("⚠️ 4H muestra tendencia BAJISTA")
+            elif 'SHORT' in ma_signal and 'ALCISTA' in tf_4h.trend:
+                warnings.append("⚠️ 4H muestra tendencia ALCISTA")
         
-        if not volatility_ok:
-            warnings.append("Alta volatilidad detectada")
+        # Check if indicators are split
+        long_votes = tv_votes['long_count']
+        short_votes = tv_votes['short_count']
+        if abs(long_votes - short_votes) <= 2:
+            warnings.append("⚠️ Indicadores muy divididos")
         
         return warnings
 
 
 def format_mtf_analysis(mtf: MTFAnalysis, strategy: dict) -> str:
-    """Format MTF analysis for Telegram - ULTRA SIMPLIFIED"""
+    """Format MTF analysis for Telegram with MA7/MA25 strategy display"""
     
     def format_price(price: float) -> str:
         if price >= 1000:
@@ -249,37 +264,80 @@ def format_mtf_analysis(mtf: MTFAnalysis, strategy: dict) -> str:
     msg += f"┃   {coin:^14}   ┃\n"
     msg += f"┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
     
-    msg += f"Precio: {format_price(mtf.price)}\n\n"
+    msg += f"💰 Precio: {format_price(mtf.price)}\n\n"
     
-    # MAIN SIGNAL - SUPER CLEAR
+    # MA7/MA25 STATUS
+    msg += "━━━ MA7/MA25 (15m) ━━━\n"
+    msg += f"{mtf.ma_crossover['description']}\n"
+    msg += f"MA7: {format_price(mtf.ma_crossover['ma7'])}\n"
+    msg += f"MA25: {format_price(mtf.ma_crossover['ma25'])}\n\n"
+    
+    # TRADINGVIEW INDICATORS (10 votes)
+    msg += "━━━ Indicadores TradingView ━━━\n"
+    long_votes = mtf.tv_votes['long_count']
+    short_votes = mtf.tv_votes['short_count']
+    neutral = mtf.tv_votes['neutral_count']
+    
+    # Visual vote bar
+    bar_long = "🟢" * long_votes
+    bar_short = "🔴" * short_votes
+    bar_neutral = "⚪" * neutral
+    
+    msg += f"LONG: {long_votes}  {bar_long}\n"
+    msg += f"SHORT: {short_votes}  {bar_short}\n"
+    if neutral > 0:
+        msg += f"NEUTRAL: {neutral}  {bar_neutral}\n"
+    msg += "\n"
+    
+    # Individual votes breakdown
+    msg += "Detalle:\n"
+    for name, vote_data in mtf.tv_votes['votes'].items():
+        vote = vote_data['vote']
+        reason = vote_data['reason']
+        if vote > 0:
+            icon = "🟢"
+        elif vote < 0:
+            icon = "🔴"
+        else:
+            icon = "⚪"
+        msg += f"  {icon} {name}: {reason}\n"
+    msg += "\n"
+    
+    # MAIN SIGNAL
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
     if mtf.should_trade:
         if mtf.trade_direction == "LONG":
             msg += "┏━ SEÑAL: COMPRA ▲\n\n"
         else:
             msg += "┏━ SEÑAL: VENTA ▼\n\n"
         
-        msg += f"Confianza: {mtf.confidence:.0f}%\n\n"
+        msg += f"Confianza: {mtf.confidence}%\n"
+        msg += f"Razón: {mtf.reason}\n\n"
         
-        # Simple entry/exit levels
-        msg += "Niveles:\n"
+        # Entry/exit levels
+        msg += "📊 Niveles:\n"
         msg += f"  Entrada → {format_price(strategy['entry'])}\n"
-        msg += f"  Stop   → {format_price(strategy['sl'])}\n"
-        msg += f"  Target → {format_price(strategy['tp1'])}\n\n"
+        msg += f"  Stop    → {format_price(strategy['sl'])}\n"
+        msg += f"  Target  → {format_price(strategy['tp1'])}\n\n"
     else:
-        msg += "┏━ SEÑAL: ESPERAR\n\n"
+        msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
         msg += f"{mtf.reason}\n\n"
     
-    # Simple timeframes status
-    msg += "Timeframes:\n"
-    for tf_name, tf_data in[('1D', mtf.tf_1d), ('4H', mtf.tf_4h), ('15M', mtf.tf_15m)]:
-        if tf_data:
-            if "ALCISTA" in tf_data.trend or "BULLISH" in tf_data.trend:
-                arrow = "▲"
-            elif "BAJISTA" in tf_data.trend or "BEARISH" in tf_data.trend:
-                arrow = "▼"
-            else:
-                arrow = "▬"
-            msg += f"  {tf_name} {arrow}\n"
+    # Warnings
+    if mtf.warnings:
+        msg += "⚠️ Advertencias:\n"
+        for w in mtf.warnings:
+            msg += f"  {w}\n"
+        msg += "\n"
+    
+    # Higher timeframe context
+    msg += "━━━ Contexto ━━━\n"
+    if mtf.tf_1h:
+        trend_icon = "▲" if "ALCISTA" in mtf.tf_1h.trend else ("▼" if "BAJISTA" in mtf.tf_1h.trend else "▬")
+        msg += f"  1H: {trend_icon} {mtf.tf_1h.trend}\n"
+    if mtf.tf_4h:
+        trend_icon = "▲" if "ALCISTA" in mtf.tf_4h.trend else ("▼" if "BAJISTA" in mtf.tf_4h.trend else "▬")
+        msg += f"  4H: {trend_icon} {mtf.tf_4h.trend}\n"
     
     msg += f"\n┗━━━━━━━━━━━━━━━━━━━━"
     

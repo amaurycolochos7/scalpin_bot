@@ -44,8 +44,13 @@ class TechnicalAnalyzer:
         self._calculate_volume_indicators()
         
     def _calculate_trend_indicators(self):
-        """Calculate trend-following indicators (EMAs, MACD)"""
+        """Calculate trend-following indicators (MAs, EMAs, MACD)"""
         close = self.df['close']
+        
+        # Simple Moving Averages (MA7, MA25, MA99 - TradingView style)
+        self.df['ma_7'] = ta.trend.SMAIndicator(close, window=7).sma_indicator()
+        self.df['ma_25'] = ta.trend.SMAIndicator(close, window=25).sma_indicator()
+        self.df['ma_99'] = ta.trend.SMAIndicator(close, window=99).sma_indicator()
         
         # Exponential Moving Averages
         self.df['ema_9'] = ta.trend.EMAIndicator(close, window=9).ema_indicator()
@@ -65,8 +70,15 @@ class TechnicalAnalyzer:
             low = self.df['low']
             adx = ta.trend.ADXIndicator(high, low, close, window=14)
             self.df['adx'] = adx.adx()
+            self.df['adx_plus'] = adx.adx_pos()
+            self.df['adx_minus'] = adx.adx_neg()
         except:
             self.df['adx'] = 0
+            self.df['adx_plus'] = 0
+            self.df['adx_minus'] = 0
+        
+        # Rate of Change (Momentum)
+        self.df['roc'] = ta.momentum.ROCIndicator(close, window=10).roc()
         
     def _calculate_momentum_indicators(self):
         """Calculate momentum indicators (RSI, Stochastic)"""
@@ -111,6 +123,217 @@ class TechnicalAnalyzer:
         
         # Volume ratio (current vs average)
         self.df['volume_ratio'] = volume / self.df['volume_ma']
+    
+    def detect_ma_crossover(self) -> dict:
+        """
+        Detect MA7/MA25 crossover - MAIN SIGNAL according to friend's strategy
+        
+        Returns:
+            Dictionary with crossover info:
+            - signal: 'LONG', 'SHORT', or 'NONE'
+            - description: explanation of the crossover
+            - ma7: current MA7 value
+            - ma25: current MA25 value
+        """
+        if len(self.df) < 3:
+            return {'signal': 'NONE', 'description': 'Datos insuficientes', 'ma7': 0, 'ma25': 0}
+        
+        last = self.df.iloc[-1]
+        prev = self.df.iloc[-2]
+        
+        ma7_now = last['ma_7']
+        ma25_now = last['ma_25']
+        ma7_prev = prev['ma_7']
+        ma25_prev = prev['ma_25']
+        
+        # LONG: MA7 cruza hacia ARRIBA de MA25 (estaba abajo, ahora arriba)
+        if ma7_prev <= ma25_prev and ma7_now > ma25_now:
+            return {
+                'signal': 'LONG',
+                'description': '🟢 MA7 cruzó ARRIBA de MA25 → LONG',
+                'ma7': ma7_now,
+                'ma25': ma25_now
+            }
+        
+        # SHORT: MA7 cruza hacia ABAJO de MA25 (estaba arriba, ahora abajo)
+        if ma7_prev >= ma25_prev and ma7_now < ma25_now:
+            return {
+                'signal': 'SHORT',
+                'description': '🔴 MA7 cruzó ABAJO de MA25 → SHORT',
+                'ma7': ma7_now,
+                'ma25': ma25_now
+            }
+        
+        # No crossover, but determine current position
+        if ma7_now > ma25_now:
+            return {
+                'signal': 'LONG_TREND',
+                'description': 'MA7 está ARRIBA de MA25 (tendencia alcista)',
+                'ma7': ma7_now,
+                'ma25': ma25_now
+            }
+        else:
+            return {
+                'signal': 'SHORT_TREND',
+                'description': 'MA7 está ABAJO de MA25 (tendencia bajista)',
+                'ma7': ma7_now,
+                'ma25': ma25_now
+            }
+    
+    def get_tradingview_votes(self) -> dict:
+        """
+        Get votes from 10 TradingView-style indicators
+        Each indicator votes: 1 (LONG), -1 (SHORT), or 0 (NEUTRAL)
+        
+        Returns:
+            Dictionary with votes and summary
+        """
+        last = self.df.iloc[-1]
+        prev = self.df.iloc[-2] if len(self.df) > 1 else last
+        
+        votes = {}
+        
+        # 1. MA7 - Price above/below MA7
+        if last['close'] > last['ma_7']:
+            votes['MA7'] = {'vote': 1, 'reason': 'Precio arriba de MA7'}
+        elif last['close'] < last['ma_7']:
+            votes['MA7'] = {'vote': -1, 'reason': 'Precio abajo de MA7'}
+        else:
+            votes['MA7'] = {'vote': 0, 'reason': 'Precio en MA7'}
+        
+        # 2. MA25 - Price above/below MA25
+        if last['close'] > last['ma_25']:
+            votes['MA25'] = {'vote': 1, 'reason': 'Precio arriba de MA25'}
+        elif last['close'] < last['ma_25']:
+            votes['MA25'] = {'vote': -1, 'reason': 'Precio abajo de MA25'}
+        else:
+            votes['MA25'] = {'vote': 0, 'reason': 'Precio en MA25'}
+        
+        # 3. MA99 - Price above/below MA99
+        if not pd.isna(last['ma_99']):
+            if last['close'] > last['ma_99']:
+                votes['MA99'] = {'vote': 1, 'reason': 'Precio arriba de MA99'}
+            elif last['close'] < last['ma_99']:
+                votes['MA99'] = {'vote': -1, 'reason': 'Precio abajo de MA99'}
+            else:
+                votes['MA99'] = {'vote': 0, 'reason': 'Precio en MA99'}
+        else:
+            votes['MA99'] = {'vote': 0, 'reason': 'MA99 no disponible'}
+        
+        # 4. RSI
+        rsi = last['rsi']
+        if not pd.isna(rsi):
+            if rsi < 30:
+                votes['RSI'] = {'vote': 1, 'reason': f'RSI sobreventa ({rsi:.0f})'}
+            elif rsi > 70:
+                votes['RSI'] = {'vote': -1, 'reason': f'RSI sobrecompra ({rsi:.0f})'}
+            elif rsi < 50:
+                votes['RSI'] = {'vote': -1, 'reason': f'RSI bajista ({rsi:.0f})'}
+            else:
+                votes['RSI'] = {'vote': 1, 'reason': f'RSI alcista ({rsi:.0f})'}
+        else:
+            votes['RSI'] = {'vote': 0, 'reason': 'RSI no disponible'}
+        
+        # 5. MACD
+        if not pd.isna(last['macd']) and not pd.isna(last['macd_signal']):
+            macd_diff = last['macd'] - last['macd_signal']
+            if macd_diff > 0:
+                votes['MACD'] = {'vote': 1, 'reason': 'MACD alcista'}
+            else:
+                votes['MACD'] = {'vote': -1, 'reason': 'MACD bajista'}
+        else:
+            votes['MACD'] = {'vote': 0, 'reason': 'MACD no disponible'}
+        
+        # 6. Stochastic
+        stoch_k = last.get('stoch_k')
+        stoch_d = last.get('stoch_d')
+        if not pd.isna(stoch_k) and not pd.isna(stoch_d):
+            if stoch_k < 20:
+                votes['STOCH'] = {'vote': 1, 'reason': f'Stoch sobreventa ({stoch_k:.0f})'}
+            elif stoch_k > 80:
+                votes['STOCH'] = {'vote': -1, 'reason': f'Stoch sobrecompra ({stoch_k:.0f})'}
+            elif stoch_k > stoch_d:
+                votes['STOCH'] = {'vote': 1, 'reason': 'Stoch alcista'}
+            else:
+                votes['STOCH'] = {'vote': -1, 'reason': 'Stoch bajista'}
+        else:
+            votes['STOCH'] = {'vote': 0, 'reason': 'Stoch no disponible'}
+        
+        # 7. ADX + DI
+        adx = last.get('adx', 0)
+        adx_plus = last.get('adx_plus', 0)
+        adx_minus = last.get('adx_minus', 0)
+        if adx > 20:  # Strong trend
+            if adx_plus > adx_minus:
+                votes['ADX'] = {'vote': 1, 'reason': f'ADX alcista ({adx:.0f})'}
+            else:
+                votes['ADX'] = {'vote': -1, 'reason': f'ADX bajista ({adx:.0f})'}
+        else:
+            votes['ADX'] = {'vote': 0, 'reason': f'Sin tendencia fuerte ({adx:.0f})'}
+        
+        # 8. Bollinger Bands
+        bb_upper = last.get('bb_upper')
+        bb_lower = last.get('bb_lower')
+        bb_middle = last.get('bb_middle')
+        if not pd.isna(bb_upper) and not pd.isna(bb_lower):
+            if last['close'] <= bb_lower:
+                votes['BB'] = {'vote': 1, 'reason': 'En banda inferior'}
+            elif last['close'] >= bb_upper:
+                votes['BB'] = {'vote': -1, 'reason': 'En banda superior'}
+            elif last['close'] > bb_middle:
+                votes['BB'] = {'vote': 1, 'reason': 'Arriba de banda media'}
+            else:
+                votes['BB'] = {'vote': -1, 'reason': 'Abajo de banda media'}
+        else:
+            votes['BB'] = {'vote': 0, 'reason': 'BB no disponible'}
+        
+        # 9. OBV (On Balance Volume)
+        obv_trend = self.df['obv'].iloc[-5:].diff().mean() if len(self.df) >= 5 else 0
+        if obv_trend > 0:
+            votes['OBV'] = {'vote': 1, 'reason': 'OBV subiendo'}
+        elif obv_trend < 0:
+            votes['OBV'] = {'vote': -1, 'reason': 'OBV bajando'}
+        else:
+            votes['OBV'] = {'vote': 0, 'reason': 'OBV neutral'}
+        
+        # 10. Momentum (ROC)
+        roc = last.get('roc', 0)
+        if not pd.isna(roc):
+            if roc > 2:
+                votes['MOM'] = {'vote': 1, 'reason': f'Momentum positivo ({roc:.1f}%)'}
+            elif roc < -2:
+                votes['MOM'] = {'vote': -1, 'reason': f'Momentum negativo ({roc:.1f}%)'}
+            else:
+                votes['MOM'] = {'vote': 0, 'reason': f'Momentum neutral ({roc:.1f}%)'}
+        else:
+            votes['MOM'] = {'vote': 0, 'reason': 'Momentum no disponible'}
+        
+        # Calculate summary
+        long_votes = sum(1 for v in votes.values() if v['vote'] > 0)
+        short_votes = sum(1 for v in votes.values() if v['vote'] < 0)
+        neutral_votes = sum(1 for v in votes.values() if v['vote'] == 0)
+        total_votes = len(votes)
+        
+        # Determine signal based on 7/10 rule
+        if long_votes >= 7:
+            signal = 'STRONG_LONG'
+        elif long_votes >= 6:
+            signal = 'LONG'
+        elif short_votes >= 7:
+            signal = 'STRONG_SHORT'
+        elif short_votes >= 6:
+            signal = 'SHORT'
+        else:
+            signal = 'NEUTRAL'
+        
+        return {
+            'votes': votes,
+            'long_count': long_votes,
+            'short_count': short_votes,
+            'neutral_count': neutral_votes,
+            'total': total_votes,
+            'signal': signal
+        }
     
     def analyze_trend(self) -> Tuple[str, int, str]:
         """

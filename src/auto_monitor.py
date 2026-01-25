@@ -7,11 +7,16 @@ Sends automatic Telegram alerts when:
 """
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from telegram import Bot
 from src.binance_client import get_client
 from src.technical_analysis import TechnicalAnalyzer
+
+# Mexico/Chiapas timezone (UTC-6)
+MEXICO_TZ = timezone(timedelta(hours=-6))
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +273,7 @@ class AutoMonitor:
             msg += f"  Stop    → {fmt_price(result['sl'])}\n"
             msg += f"  Target  → {fmt_price(result['tp'])}\n\n"
             
-            msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}"
             
             await self.bot.send_message(
                 chat_id=self.chat_id,

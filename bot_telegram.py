@@ -6,7 +6,10 @@ Uses MA7/MA25 crossover strategy with TradingView 10-indicator confirmation
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# Mexico/Chiapas timezone (UTC-6)
+MEXICO_TZ = timezone(timedelta(hours=-6))
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode

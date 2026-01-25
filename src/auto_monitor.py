@@ -1,26 +1,25 @@
 """
-Auto-Monitor System
-Continuously monitors Top 20 cryptos and sends Telegram notifications
+Auto-Monitor System - MA7/MA25 Strategy
+Continuously monitors ALL Binance Futures cryptos for crossover signals
+Sends automatic Telegram alerts when:
+  - MA7/MA25 crossover happens
+  - 7/10 TradingView indicators confirm
 """
 import asyncio
 import logging
-from datetime import datetime
-from typing import Dict, List
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 from telegram import Bot
 from src.binance_client import get_client
-from src.confluence_scorer import ConfluenceScorer
-from src.ml_config import MLConfig
-from src.ml_engine import MLEngine
-import os
-import json
+from src.technical_analysis import TechnicalAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 class AutoMonitor:
     """
-    Automatic monitoring system for Top 20 cryptocurrencies
-    Runs every 5 minutes and sends notifications when ML > 95%
+    Automatic monitoring system using MA7/MA25 crossover strategy
+    Scans ALL Binance Futures cryptos and alerts on trading opportunities
     """
     
     def __init__(self, bot_token: str, chat_id: int):
@@ -36,231 +35,195 @@ class AutoMonitor:
         self.client = get_client()
         self.is_running = False
         self.monitored_symbols = []
-        self.last_signals = {}  # To avoid spam
         
-        # Load monitored symbols
-        self._load_monitored_symbols()
+        # Track signals to avoid spam
+        self.last_signals = {}  # {symbol: {'signal': 'LONG/SHORT', 'time': datetime}}
+        
+        # Scan interval (5 minutes since we use 15m candles)
+        self.scan_interval = 300  # 5 minutes
+        
+        # Minimum votes required (7/10 rule)
+        self.min_votes = 6  # At least 6/10 for alert (7 for strong)
+        
+        logger.info("AutoMonitor initialized with MA7/MA25 strategy")
     
-    def _load_monitored_symbols(self):
-        """Load Top 20 symbols that have trained models"""
+    def _load_all_futures_symbols(self) -> List[str]:
+        """Load ALL available USDT perpetual futures symbols from Binance"""
         try:
-            # Get top 20 by volume
-            top_cryptos = self.client.get_top_by_volume(limit=20)
-            
-            # Filter only those with trained models
-            models_dir = MLConfig.MODEL_DIR
-            
-            for crypto in top_cryptos:
-                symbol = crypto['symbol']
-                symbol_name = symbol.split('/')[0]
-                model_path = os.path.join(models_dir, symbol_name, 'model.txt')
-                
-                if os.path.exists(model_path):
-                    self.monitored_symbols.append({
-                        'symbol': symbol,
-                        'name': symbol_name,
-                        'model_path': os.path.join(models_dir, symbol_name)
-                    })
-            
-            logger.info(f"Loaded {len(self.monitored_symbols)} symbols with trained models")
-            
+            symbols = self.client.get_all_futures_symbols()
+            logger.info(f"Loaded {len(symbols)} futures symbols from Binance")
+            return symbols
         except Exception as e:
-            logger.error(f"Error loading monitored symbols: {e}")
+            logger.error(f"Error loading futures symbols: {e}")
+            return []
     
-    async def analyze_single(self, symbol_info: Dict) -> Dict:
+    async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """
-        Analyze a single cryptocurrency
+        Analyze a single symbol using MA7/MA25 strategy
         
         Args:
-            symbol_info: Dictionary with symbol, name, model_path
+            symbol: Trading pair (e.g., 'BTC/USDT:USDT')
             
         Returns:
-            Analysis result or None
+            Analysis result dict or None if no signal
         """
         try:
-            symbol = symbol_info['symbol']
-            symbol_name = symbol_info['name']
+            # Get 15m OHLCV data
+            df = self.client.get_ohlcv(symbol, '15m', limit=100)
             
-            # Create custom ML engine for this symbol
-            ml_engine = MLEngine(load_latest=False)
-            
-            # Load symbol-specific model
-            model_path = os.path.join(symbol_info['model_path'], 'model.txt')
-            scaler_path = os.path.join(symbol_info['model_path'], 'scaler.pkl')
-            features_path = os.path.join(symbol_info['model_path'], 'feature_names.json')
-            metadata_path = os.path.join(symbol_info['model_path'], 'metadata.json')
-            
-            if not all(os.path.exists(p) for p in [model_path, scaler_path, features_path]):
-                logger.warning(f"Model files missing for {symbol_name}")
+            if df is None or len(df) < 30:
                 return None
             
-            import lightgbm as lgb
-            import joblib
+            # Create analyzer and calculate indicators
+            analyzer = TechnicalAnalyzer(df)
+            analyzer.calculate_all_indicators()
             
-            ml_engine.model = lgb.Booster(model_file=model_path)
-            ml_engine.scaler = joblib.load(scaler_path)
+            # Get MA7/MA25 crossover
+            crossover = analyzer.detect_ma_crossover()
             
-            with open(features_path, 'r') as f:
-                ml_engine.feature_names = json.load(f)
+            # Get TradingView 10-indicator votes
+            tv_votes = analyzer.get_tradingview_votes()
             
-            with open(metadata_path, 'r') as f:
-                ml_engine.metadata = json.load(f)
-            
-            # Get OHLCV data
-            df = self.client.get_ohlcv(symbol, MLConfig.TIMEFRAME_PRIMARY, limit=200)
-            
-            if df is None or len(df) < 50:
-                return None
-            
-            # Calculate features
-            from src.feature_engineering import FeatureEngineer
-            fe = FeatureEngineer(df)
-            df_features = fe.calculate_all_features()
-            
-            # Get latest features
-            latest_features = fe.get_latest_features()
-            
-            # Predict
-            ml_probability, ml_prediction = ml_engine.predict(latest_features)
-            
-            # Calculate technical analysis
-            from src.technical_analysis import TechnicalAnalyzer
-            tech_analyzer = TechnicalAnalyzer(df)
-            tech_analysis = tech_analyzer.generate_analysis()
-            
-            tech_score = tech_analysis.get('total_score', 0)
-            tech_signal = tech_analysis.get('signal', 'NEUTRAL')
-            
-            # Determine signal
-            entry_allowed = (
-                ml_probability >= MLConfig.PROBABILITY_THRESHOLD and
-                tech_score >= MLConfig.TECHNICAL_SCORE_MIN
-            )
-            
-            signal_type = None
-            if entry_allowed:
-                if tech_signal in ['COMPRA FUERTE', 'COMPRA']:
-                    signal_type = 'LONG'
-                elif tech_signal in ['VENTA FUERTE', 'VENTA']:
-                    signal_type = 'SHORT'
-            
-            # Get current price and calculate TP/SL
+            # Current price
             current_price = df['close'].iloc[-1]
-            atr_percent = df_features['atr_percent'].iloc[-1]
             
-            tp_percent, sl_percent = MLConfig.get_tp_sl_by_atr(atr_percent)
+            # Get symbol name for display
+            symbol_name = symbol.replace('/USDT:USDT', '').replace('/USDT', '')
             
+            # Check for trading signal
+            ma_signal = crossover['signal']
+            long_votes = tv_votes['long_count']
+            short_votes = tv_votes['short_count']
+            
+            # Determine if we should alert
+            should_alert = False
+            signal_type = None
+            signal_strength = 'normal'
+            reason = ''
+            
+            # FRESH CROSSOVER - Highest priority
+            if ma_signal == 'LONG':
+                should_alert = True
+                signal_type = 'LONG'
+                signal_strength = 'crossover'
+                reason = f"🟢 CRUCE ALCISTA + {long_votes}/10 indicadores"
+            
+            elif ma_signal == 'SHORT':
+                should_alert = True
+                signal_type = 'SHORT'
+                signal_strength = 'crossover'
+                reason = f"🔴 CRUCE BAJISTA + {short_votes}/10 indicadores"
+            
+            # IN TREND + Strong confirmation (7/10)
+            elif ma_signal == 'LONG_TREND' and long_votes >= 7:
+                should_alert = True
+                signal_type = 'LONG'
+                signal_strength = 'trend'
+                reason = f"📈 Tendencia ALCISTA + {long_votes}/10 indicadores"
+            
+            elif ma_signal == 'SHORT_TREND' and short_votes >= 7:
+                should_alert = True
+                signal_type = 'SHORT'
+                signal_strength = 'trend'
+                reason = f"📉 Tendencia BAJISTA + {short_votes}/10 indicadores"
+            
+            if not should_alert:
+                return None
+            
+            # Check if we already sent this signal recently
+            last_signal = self.last_signals.get(symbol_name)
+            if last_signal:
+                # Same signal within 2 hours? Skip
+                elapsed = (datetime.now() - last_signal['time']).total_seconds() / 3600
+                if elapsed < 2 and last_signal['signal'] == signal_type:
+                    return None
+                # Opposite signal? Always alert (reversal)
+            
+            # Calculate entry/exit levels
             if signal_type == 'LONG':
-                entry_price = current_price
-                tp_price = entry_price * (1 + tp_percent / 100)
-                sl_price = entry_price * (1 - sl_percent / 100)
-            elif signal_type == 'SHORT':
-                entry_price = current_price
-                tp_price = entry_price * (1 - tp_percent / 100)
-                sl_price = entry_price * (1 + sl_percent / 100)
+                entry = current_price
+                sl = current_price * 0.98  # 2% stop loss
+                tp = current_price * 1.04  # 4% take profit
             else:
-                entry_price = current_price
-                tp_price = None
-                sl_price = None
+                entry = current_price
+                sl = current_price * 1.02  # 2% stop loss
+                tp = current_price * 0.96  # 4% take profit
             
-            result = {
+            return {
                 'symbol': symbol,
                 'symbol_name': symbol_name,
                 'signal': signal_type,
-                'ml_probability': ml_probability * 100,
-                'technical_score': tech_score,
-                'entry_allowed': entry_allowed,
-                'entry_price': entry_price,
-                'tp_price': tp_price,
-                'sl_price': sl_price,
-                'technical_analysis': tech_analysis,
-                'chart_path': self._generate_chart(df, symbol_name) if entry_allowed or (ml_probability > 0.8) else None,  # Generate chart for good candidates
-                'timestamp': datetime.now().isoformat()
+                'signal_strength': signal_strength,
+                'price': current_price,
+                'entry': entry,
+                'sl': sl,
+                'tp': tp,
+                'reason': reason,
+                'long_votes': long_votes,
+                'short_votes': short_votes,
+                'crossover': crossover,
+                'tv_votes': tv_votes,
+                'timestamp': datetime.now()
             }
             
-            return result
-            
         except Exception as e:
-            logger.error(f"Error analyzing {symbol_info['name']}: {e}")
-            return None
-
-    def _generate_chart(self, df: pd.DataFrame, symbol_name: str) -> str:
-        """Generate candlestick chart with indicators"""
-        try:
-            import mplfinance as mpf
-            import matplotlib.pyplot as plt
-            
-            # Prepare data
-            plot_df = df.tail(50).copy()  # Last 50 candles
-            plot_df.index = pd.to_datetime(plot_df['timestamp'])
-            
-            # Style
-            s = mpf.make_mpf_style(base_mpf_style='charles', rc={'font.size': 8})
-            
-            # Add EMAs
-            plots = [
-                mpf.make_addplot(plot_df['ema_9'], color='cyan', width=1),
-                mpf.make_addplot(plot_df['ema_50'], color='orange', width=1),
-                mpf.make_addplot(plot_df['ema_200'], color='white', width=1.5),
-            ]
-            
-            # Save path
-            filename = f"chart_{symbol_name}_{datetime.now().strftime('%H%M%S')}.png"
-            path = os.path.join(os.getcwd(), 'temp_charts')
-            os.makedirs(path, exist_ok=True)
-            full_path = os.path.join(path, filename)
-            
-            # Generate chart
-            mpf.plot(
-                plot_df,
-                type='candle',
-                style=s,
-                addplot=plots,
-                title=f"\n{symbol_name} - 1m Timeframe",
-                volume=True,
-                savefig=dict(fname=full_path, dpi=100, bbox_inches='tight'),
-                block=False
-            )
-            
-            plt.close('all')
-            return full_path
-            
-        except Exception as e:
-            logger.error(f"Error generating chart: {e}")
+            logger.debug(f"Error analyzing {symbol}: {e}")
             return None
     
-    async def scan_all(self) -> List[Dict]:
+    async def scan_all_symbols(self) -> List[Dict]:
         """
-        Scan all monitored cryptocurrencies
+        Scan ALL Binance futures symbols for signals
         
         Returns:
-            List of analysis results
+            List of symbols with trading signals
         """
-        logger.info(f"Starting scan of {len(self.monitored_symbols)} symbols...")
+        logger.info("Starting full market scan...")
         
-        tasks = []
-        for symbol_info in self.monitored_symbols:
-            task = self.analyze_single(symbol_info)
-            tasks.append(task)
+        # Get all symbols
+        all_symbols = self._load_all_futures_symbols()
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        if not all_symbols:
+            logger.warning("No symbols to scan")
+            return []
         
-        # Filter valid results
-        valid_results = []
-        for r in results:
-            if isinstance(r, dict) and r is not None:
-                valid_results.append(r)
+        self.monitored_symbols = all_symbols
         
-        logger.info(f"Scan complete: {len(valid_results)} valid results")
+        # Analyze each symbol (with rate limiting)
+        signals = []
+        batch_size = 10
         
-        return valid_results
+        for i in range(0, len(all_symbols), batch_size):
+            batch = all_symbols[i:i+batch_size]
+            tasks = [self.analyze_symbol(symbol) for symbol in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, dict) and result is not None:
+                    signals.append(result)
+            
+            # Small delay to avoid rate limits
+            await asyncio.sleep(0.5)
+        
+        # Sort by strength (crossovers first, then by vote count)
+        signals.sort(key=lambda x: (
+            x['signal_strength'] == 'crossover',  # Crossovers first
+            max(x['long_votes'], x['short_votes'])  # Then by vote count
+        ), reverse=True)
+        
+        logger.info(f"Scan complete: {len(signals)} signals found from {len(all_symbols)} symbols")
+        
+        return signals
     
-    async def send_notification(self, result: Dict):
-        """Send Telegram notification for a signal"""
+    async def send_alert(self, result: Dict):
+        """Send Telegram alert for a trading signal"""
         try:
+            if not self.chat_id or self.chat_id == 0:
+                logger.warning("No chat_id set, skipping notification")
+                return
+            
             symbol_name = result['symbol_name']
-            prob = result['ml_probability']
             signal = result['signal']
+            strength = result['signal_strength']
             
             # Format price
             def fmt_price(price):
@@ -271,19 +234,41 @@ class AutoMonitor:
                 else:
                     return f"${price:.8f}"
             
-            msg = f"🔔 *SEÑAL DETECTADA - {symbol_name}*\n\n"
-            msg += f"📈 Probabilidad ML: *{prob:.1f}%* {'✅✅' if prob >= 97 else '✅'}\n\n"
-            
-            if signal == 'LONG':
-                msg += f"💰 *COMPRAR* ▲\n"
+            # Build message
+            if strength == 'crossover':
+                header = f"🔔 *CRUCE DETECTADO - {symbol_name}*"
             else:
-                msg += f"💰 *VENDER* ▼\n"
+                header = f"📊 *SEÑAL - {symbol_name}*"
             
-            msg += f"  Entry: {fmt_price(result['entry_price'])}\n"
-            msg += f"  TP: {fmt_price(result['tp_price'])} (+{result['tp_percent']:.1f}%)\n"
-            msg += f"  SL: {fmt_price(result['sl_price'])} (-{result['sl_percent']:.1f}%)\n\n"
+            msg = f"{header}\n\n"
+            msg += f"💰 Precio: {fmt_price(result['price'])}\n\n"
             
-            msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+            # Crossover info
+            msg += f"━━━ MA7/MA25 (15m) ━━━\n"
+            msg += f"{result['crossover']['description']}\n\n"
+            
+            # Votes
+            long_v = result['long_votes']
+            short_v = result['short_votes']
+            msg += f"━━━ Indicadores ━━━\n"
+            msg += f"LONG: {long_v}  {'🟢' * long_v}\n"
+            msg += f"SHORT: {short_v}  {'🔴' * short_v}\n\n"
+            
+            # Signal
+            if signal == 'LONG':
+                msg += f"┏━ *COMPRA ▲*\n\n"
+            else:
+                msg += f"┏━ *VENTA ▼*\n\n"
+            
+            msg += f"{result['reason']}\n\n"
+            
+            # Levels
+            msg += f"📊 Niveles:\n"
+            msg += f"  Entrada → {fmt_price(result['entry'])}\n"
+            msg += f"  Stop    → {fmt_price(result['sl'])}\n"
+            msg += f"  Target  → {fmt_price(result['tp'])}\n\n"
+            
+            msg += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
             
             await self.bot.send_message(
                 chat_id=self.chat_id,
@@ -291,41 +276,39 @@ class AutoMonitor:
                 parse_mode='Markdown'
             )
             
-            logger.info(f"Notification sent for {symbol_name}")
+            # Record signal
+            self.last_signals[symbol_name] = {
+                'signal': signal,
+                'time': datetime.now()
+            }
+            
+            logger.info(f"Alert sent: {symbol_name} - {signal}")
             
         except Exception as e:
-            logger.error(f"Error sending notification: {e}")
+            logger.error(f"Error sending alert: {e}")
     
     async def monitor_loop(self):
         """Main monitoring loop"""
-        logger.info("Starting auto-monitor loop...")
+        logger.info("Starting MA7/MA25 auto-monitor loop...")
         
         while self.is_running:
             try:
                 # Scan all symbols
-                results = await self.scan_all()
+                signals = await self.scan_all_symbols()
                 
-                # Send notifications for signals > 95%
-                for result in results:
-                    if result['entry_allowed'] and result['signal']:
-                        symbol_name = result['symbol_name']
-                        
-                        # Check if we already sent this signal recently (avoid spam)
-                        last_signal_time = self.last_signals.get(symbol_name)
-                        now = datetime.now()
-                        
-                        if last_signal_time:
-                            elapsed = (now - last_signal_time).total_seconds() / 60
-                            if elapsed < 60:  # Don't send same symbol within 1 hour
-                                logger.info(f"Skipping {symbol_name} (sent {elapsed:.0f}min ago)")
-                                continue
-                        
-                        await self.send_notification(result)
-                        self.last_signals[symbol_name] = now
+                # Send alerts for each signal (max 5 per scan to avoid spam)
+                alerts_sent = 0
+                for result in signals[:5]:
+                    await self.send_alert(result)
+                    alerts_sent += 1
+                    await asyncio.sleep(1)  # 1 second between messages
                 
-                # Wait 60 seconds (1 minute for scalping)
-                logger.info("Waiting 60 seconds for next scan...")
-                await asyncio.sleep(60)
+                if alerts_sent > 0:
+                    logger.info(f"Sent {alerts_sent} alerts")
+                
+                # Wait for next scan
+                logger.info(f"Waiting {self.scan_interval} seconds for next scan...")
+                await asyncio.sleep(self.scan_interval)
                 
             except Exception as e:
                 logger.error(f"Error in monitor loop: {e}")
@@ -338,6 +321,7 @@ class AutoMonitor:
             return
         
         self.is_running = True
+        logger.info("MA7/MA25 Auto-Monitor started!")
         await self.monitor_loop()
     
     def stop(self):
@@ -350,5 +334,17 @@ class AutoMonitor:
         return {
             'is_running': self.is_running,
             'monitored_count': len(self.monitored_symbols),
-            'monitored_symbols': [s['name'] for s in self.monitored_symbols]
+            'monitored_symbols': [s.replace('/USDT:USDT', '') for s in self.monitored_symbols[:20]],
+            'strategy': 'MA7/MA25 + TradingView 10 Indicators',
+            'scan_interval': f'{self.scan_interval} seconds'
         }
+    
+    async def analyze_single(self, symbol_info: Dict) -> Optional[Dict]:
+        """
+        Analyze a single symbol - compatibility method
+        Used by bot_telegram.py for manual analysis
+        """
+        symbol = symbol_info.get('symbol')
+        if not symbol:
+            return None
+        return await self.analyze_symbol(symbol)

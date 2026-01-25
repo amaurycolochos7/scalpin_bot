@@ -64,7 +64,12 @@ class AutoMonitor:
     
     async def analyze_symbol(self, symbol: str) -> Optional[Dict]:
         """
-        Analyze a single symbol using MA7/MA25 strategy
+        Analyze a single symbol using CANDLE COLOR STRATEGY
+        
+        Strategy (friend's method):
+        1. Revisar velas de 4H (tendencia principal)
+        2. Revisar velas de 1H (confirmación intermedia)
+        3. Revisar velas de 15m: 3+ velas del mismo color = cambio confirmado
         
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT:USDT')
@@ -73,64 +78,103 @@ class AutoMonitor:
             Analysis result dict or None if no signal
         """
         try:
-            # Get 15m OHLCV data
-            df = self.client.get_ohlcv(symbol, '15m', limit=100)
-            
-            if df is None or len(df) < 30:
-                return None
-            
-            # Create analyzer and calculate indicators
-            analyzer = TechnicalAnalyzer(df)
-            analyzer.calculate_all_indicators()
-            
-            # Get MA7/MA25 crossover
-            crossover = analyzer.detect_ma_crossover()
-            
-            # Get TradingView 10-indicator votes
-            tv_votes = analyzer.get_tradingview_votes()
-            
-            # Current price
-            current_price = df['close'].iloc[-1]
-            
-            # Get symbol name for display (add USDT for futures)
+            # Get symbol name for display
             symbol_name = symbol.replace('/USDT:USDT', 'USDT').replace('/USDT', 'USDT')
             
-            # Check for trading signal
-            ma_signal = crossover['signal']
-            long_votes = tv_votes['long_count']
-            short_votes = tv_votes['short_count']
+            # ========== 15M ANALYSIS (CONFIRMATION) ==========
+            df_15m = self.client.get_ohlcv(symbol, '15m', limit=100)
+            if df_15m is None or len(df_15m) < 30:
+                return None
             
-            # Determine if we should alert
+            analyzer_15m = TechnicalAnalyzer(df_15m)
+            analyzer_15m.calculate_all_indicators()
+            crossover = analyzer_15m.detect_ma_crossover()
+            tv_votes = analyzer_15m.get_tradingview_votes()
+            candle_15m = analyzer_15m.detect_candle_color_trend(lookback=6)
+            
+            current_price = df_15m['close'].iloc[-1]
+            
+            # ========== 1H ANALYSIS (INTERMEDIATE) ==========
+            trend_1h = 'NONE'
+            candle_1h = {'trend_change': 'NONE', 'candle_colors': '', 'consecutive_green': 0, 'consecutive_red': 0}
+            try:
+                df_1h = self.client.get_ohlcv(symbol, '1h', limit=50)
+                if df_1h is not None and len(df_1h) >= 10:
+                    analyzer_1h = TechnicalAnalyzer(df_1h)
+                    analyzer_1h.calculate_all_indicators()
+                    ma_1h = analyzer_1h.detect_ma_crossover()
+                    candle_1h = analyzer_1h.detect_candle_color_trend(lookback=6)
+                    
+                    if 'LONG' in ma_1h['signal'] or ma_1h['ma7'] > ma_1h['ma25']:
+                        trend_1h = 'BULLISH'
+                    elif 'SHORT' in ma_1h['signal'] or ma_1h['ma7'] < ma_1h['ma25']:
+                        trend_1h = 'BEARISH'
+            except:
+                pass
+            
+            # ========== 4H ANALYSIS (MAIN TREND) ==========
+            trend_4h = 'NONE'
+            candle_4h = {'trend_change': 'NONE', 'candle_colors': '', 'consecutive_green': 0, 'consecutive_red': 0}
+            try:
+                df_4h = self.client.get_ohlcv(symbol, '4h', limit=50)
+                if df_4h is not None and len(df_4h) >= 10:
+                    analyzer_4h = TechnicalAnalyzer(df_4h)
+                    analyzer_4h.calculate_all_indicators()
+                    ma_4h = analyzer_4h.detect_ma_crossover()
+                    candle_4h = analyzer_4h.detect_candle_color_trend(lookback=6)
+                    
+                    if 'LONG' in ma_4h['signal'] or ma_4h['ma7'] > ma_4h['ma25']:
+                        trend_4h = 'BULLISH'
+                    elif 'SHORT' in ma_4h['signal'] or ma_4h['ma7'] < ma_4h['ma25']:
+                        trend_4h = 'BEARISH'
+            except:
+                pass
+            
+            # ========== DECISION LOGIC (CANDLE COLOR STRATEGY) ==========
+            candle_trend = candle_15m.get('trend_change', 'NONE')
+            candle_confirmed = candle_15m.get('confirmed', False)
+            consecutive = max(candle_15m.get('consecutive_green', 0), candle_15m.get('consecutive_red', 0))
+            
             should_alert = False
             signal_type = None
             signal_strength = 'normal'
             reason = ''
             
-            # FRESH CROSSOVER - Highest priority
-            if ma_signal == 'LONG':
-                should_alert = True
-                signal_type = 'LONG'
-                signal_strength = 'crossover'
-                reason = f"🟢 CRUCE ALCISTA + {long_votes}/10 indicadores"
+            # LONG / COMPRA: 3+ green candles + timeframes aligned
+            if candle_trend == 'BULLISH' and candle_confirmed:
+                if trend_4h == 'BULLISH' and trend_1h == 'BULLISH':
+                    should_alert = True
+                    signal_type = 'LONG'
+                    signal_strength = 'confirmed'
+                    reason = f'✅ COMPRA / LONG confirmado\n   4H: ▲ | 1H: ▲ | 15m: {consecutive} velas verdes'
+                elif trend_4h == 'BULLISH':
+                    should_alert = True
+                    signal_type = 'LONG'
+                    signal_strength = 'partial'
+                    reason = f'🟢 COMPRA / LONG (4H alcista)\n   15m: {consecutive} velas verdes'
+                elif trend_1h == 'BULLISH':
+                    should_alert = True
+                    signal_type = 'LONG'
+                    signal_strength = 'partial'
+                    reason = f'🟢 COMPRA / LONG (1H alcista)\n   15m: {consecutive} velas verdes'
             
-            elif ma_signal == 'SHORT':
-                should_alert = True
-                signal_type = 'SHORT'
-                signal_strength = 'crossover'
-                reason = f"🔴 CRUCE BAJISTA + {short_votes}/10 indicadores"
-            
-            # IN TREND + Strong confirmation (7/10)
-            elif ma_signal == 'LONG_TREND' and long_votes >= 7:
-                should_alert = True
-                signal_type = 'LONG'
-                signal_strength = 'trend'
-                reason = f"📈 Tendencia ALCISTA + {long_votes}/10 indicadores"
-            
-            elif ma_signal == 'SHORT_TREND' and short_votes >= 7:
-                should_alert = True
-                signal_type = 'SHORT'
-                signal_strength = 'trend'
-                reason = f"📉 Tendencia BAJISTA + {short_votes}/10 indicadores"
+            # SHORT / VENTA: 3+ red candles + timeframes aligned
+            elif candle_trend == 'BEARISH' and candle_confirmed:
+                if trend_4h == 'BEARISH' and trend_1h == 'BEARISH':
+                    should_alert = True
+                    signal_type = 'SHORT'
+                    signal_strength = 'confirmed'
+                    reason = f'✅ VENTA / SHORT confirmado\n   4H: ▼ | 1H: ▼ | 15m: {consecutive} velas rojas'
+                elif trend_4h == 'BEARISH':
+                    should_alert = True
+                    signal_type = 'SHORT'
+                    signal_strength = 'partial'
+                    reason = f'🔴 VENTA / SHORT (4H bajista)\n   15m: {consecutive} velas rojas'
+                elif trend_1h == 'BEARISH':
+                    should_alert = True
+                    signal_type = 'SHORT'
+                    signal_strength = 'partial'
+                    reason = f'🔴 VENTA / SHORT (1H bajista)\n   15m: {consecutive} velas rojas'
             
             if not should_alert:
                 return None
@@ -138,11 +182,9 @@ class AutoMonitor:
             # Check if we already sent this signal recently
             last_signal = self.last_signals.get(symbol_name)
             if last_signal:
-                # Same signal within 2 hours? Skip
                 elapsed = (datetime.now() - last_signal['time']).total_seconds() / 3600
                 if elapsed < 2 and last_signal['signal'] == signal_type:
                     return None
-                # Opposite signal? Always alert (reversal)
             
             # Calculate entry/exit levels
             if signal_type == 'LONG':
@@ -164,10 +206,16 @@ class AutoMonitor:
                 'sl': sl,
                 'tp': tp,
                 'reason': reason,
-                'long_votes': long_votes,
-                'short_votes': short_votes,
+                'long_votes': tv_votes['long_count'],
+                'short_votes': tv_votes['short_count'],
                 'crossover': crossover,
                 'tv_votes': tv_votes,
+                # Candle color data (NEW)
+                'candle_15m': candle_15m,
+                'candle_1h': candle_1h,
+                'candle_4h': candle_4h,
+                'trend_4h': trend_4h,
+                'trend_1h': trend_1h,
                 'timestamp': datetime.now()
             }
             
@@ -220,7 +268,7 @@ class AutoMonitor:
         return signals
     
     async def send_alert(self, result: Dict):
-        """Send Telegram alert for a trading signal"""
+        """Send Telegram alert for a trading signal with CANDLE COLOR display"""
         try:
             if not self.chat_id or self.chat_id == 0:
                 logger.warning("No chat_id set, skipping notification")
@@ -239,31 +287,64 @@ class AutoMonitor:
                 else:
                     return f"${price:.8f}"
             
-            # Build message
-            if strength == 'crossover':
-                header = f"🔔 *CRUCE DETECTADO - {symbol_name}*"
+            # Build message with new format
+            if strength == 'confirmed':
+                header = f"✅ *CONFIRMADO - {symbol_name}*"
             else:
                 header = f"📊 *SEÑAL - {symbol_name}*"
             
             msg = f"{header}\n\n"
             msg += f"💰 Precio: {fmt_price(result['price'])}\n\n"
             
-            # Crossover info
-            msg += f"━━━ MA7/MA25 (15m) ━━━\n"
-            msg += f"{result['crossover']['description']}\n\n"
+            # ========== MULTI-TIMEFRAME ANALYSIS ==========
+            msg += "━━━ Análisis Multi-Timeframe ━━━\n"
             
-            # Votes
-            long_v = result['long_votes']
-            short_v = result['short_votes']
-            msg += f"━━━ Indicadores ━━━\n"
-            msg += f"LONG: {long_v}  {'🟢' * long_v}\n"
-            msg += f"SHORT: {short_v}  {'🔴' * short_v}\n\n"
-            
-            # Signal
-            if signal == 'LONG':
-                msg += f"┏━ *COMPRA ▲*\n\n"
+            # 4H
+            trend_4h = result.get('trend_4h', 'NONE')
+            candle_4h = result.get('candle_4h', {})
+            if trend_4h == 'BULLISH':
+                msg += f"📊 4H: ▲ ALCISTA\n"
+            elif trend_4h == 'BEARISH':
+                msg += f"📊 4H: ▼ BAJISTA\n"
             else:
-                msg += f"┏━ *VENTA ▼*\n\n"
+                msg += f"📊 4H: ▬ LATERAL\n"
+            if candle_4h.get('candle_colors'):
+                msg += f"   Velas: {candle_4h['candle_colors']}\n"
+            
+            # 1H
+            trend_1h = result.get('trend_1h', 'NONE')
+            candle_1h = result.get('candle_1h', {})
+            if trend_1h == 'BULLISH':
+                msg += f"📊 1H: ▲ ALCISTA\n"
+            elif trend_1h == 'BEARISH':
+                msg += f"📊 1H: ▼ BAJISTA\n"
+            else:
+                msg += f"📊 1H: ▬ LATERAL\n"
+            if candle_1h.get('candle_colors'):
+                msg += f"   Velas: {candle_1h['candle_colors']}\n"
+            
+            # 15m (KEY)
+            candle_15m = result.get('candle_15m', {})
+            consecutive = max(candle_15m.get('consecutive_green', 0), candle_15m.get('consecutive_red', 0))
+            if candle_15m.get('trend_change') == 'BULLISH':
+                msg += f"📊 15m: ▲ {consecutive} velas VERDES\n"
+            elif candle_15m.get('trend_change') == 'BEARISH':
+                msg += f"📊 15m: ▼ {consecutive} velas ROJAS\n"
+            else:
+                msg += f"📊 15m: ▬ Sin tendencia\n"
+            if candle_15m.get('candle_colors'):
+                msg += f"   Velas: {candle_15m['candle_colors']}\n"
+            
+            if candle_15m.get('confirmed'):
+                msg += "   ✅ *Confirmado (3+ velas)*\n"
+            
+            msg += "\n"
+            
+            # ========== SIGNAL ==========
+            if signal == 'LONG':
+                msg += f"┏━ *SEÑAL: COMPRA / LONG ▲*\n\n"
+            else:
+                msg += f"┏━ *SEÑAL: VENTA / SHORT ▼*\n\n"
             
             msg += f"{result['reason']}\n\n"
             

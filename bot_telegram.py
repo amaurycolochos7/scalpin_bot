@@ -47,7 +47,7 @@ def format_price(price: float) -> str:
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menú principal - 2 botones esenciales"""
     keyboard = [
-        [InlineKeyboardButton("📊 Criptomonedas Monitoreadas", callback_data="view_monitored")],
+        [InlineKeyboardButton("📊 Resumen del Mercado", callback_data="view_monitored")],
         [InlineKeyboardButton("🔍 Analizar Otra Moneda", callback_data="analyze_other")]
     ]
     

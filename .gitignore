@@ -1,51 +1,47 @@
-# Environment variables
-.env
-
-# Virtual environment
-venv/
-env/
-ENV/
-.venv/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-
-# Distribution / packaging
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+venv/
+env/
+ENV/
 *.egg-info/
-.installed.cfg
+.eggs/
 *.egg
 
-# IDEs
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS specific
+# Logs
+*.log
+bot.log
+bot_error.log
+
+# Environment
+.env
+
+# Modelos entrenados (muy pesados)
+models/
+!models/.gitkeep
+
+# Temporal
+*.tmp
+*.bak
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Charts and images (optional)
-charts/
-*.png
-*.jpg
+# Antigravity
+.gemini/

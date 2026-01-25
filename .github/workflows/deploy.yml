@@ -1,0 +1,37 @@
+name: Auto Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main  # O el branch que uses
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 🚀 Deploy to AWS EC2
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.AWS_HOST }}
+        username: ${{ secrets.AWS_USERNAME }}
+        key: ${{ secrets.AWS_SSH_KEY }}
+        port: 22
+        script: |
+          cd /home/ubuntu/trading-bot
+          
+          echo "🛑 Deteniendo bot..."
+          pkill -f bot_telegram.py || true
+          
+          echo "📥 Descargando actualización..."
+          git pull origin main
+          
+          echo "📦 Instalando dependencias..."
+          pip install -r requirements.txt
+          
+          echo "🚀 Reiniciando bot..."
+          nohup python bot_telegram.py > bot.log 2>&1 &
+          
+          echo "✅ Deploy completado!"
+          echo "📊 Estado del bot:"
+          ps aux | grep bot_telegram.py | grep -v grep

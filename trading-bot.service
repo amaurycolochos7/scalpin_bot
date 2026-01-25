@@ -1,0 +1,20 @@
+[Unit]
+Description=Trading Bot ML - Auto Monitor System
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/trading-bot
+Environment="PATH=/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/usr/bin/python3 /home/ubuntu/trading-bot/bot_telegram.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ubuntu/trading-bot/bot.log
+StandardError=append:/home/ubuntu/trading-bot/bot_error.log
+
+# Limits
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

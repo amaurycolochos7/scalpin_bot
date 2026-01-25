@@ -32,12 +32,18 @@ class BinanceClient:
                     'enableRateLimit': True,
                 })
             
-            # Load markets
-            self.exchange.load_markets()
-            print(f"✅ Connected to {config.EXCHANGE.upper()}")
+            # Load markets (may fail in restricted regions, but that's OK for public data)
+            try:
+                self.exchange.load_markets()
+            except Exception as e:
+                print(f"⚠ Warning: Could not load private markets (region restricted): {str(e)[:100]}")
+                print("OK - Conectado a Binance Futures (solo funciones publicas)")
+            else:
+                print(f"✅ Connected to {config.EXCHANGE.upper()}")
             
         except Exception as e:
-            raise ConnectionError(f"Failed to connect to Binance: {str(e)}")
+            print(f"ERROR: Failed to connect to Binance: {str(e)}")
+            print("OK - Continuando sin conexion completa...")
     
     def get_ohlcv(self, symbol: str, timeframe: str = None, limit: int = None) -> pd.DataFrame:
         """
@@ -64,9 +70,8 @@ class BinanceClient:
                 columns=['timestamp', 'open', 'high', 'low', 'close', 'volume']
             )
             
-            # Convert timestamp to datetime
+            # Convert timestamp to datetime but keep as column (not index)
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-            df.set_index('timestamp', inplace=True)
             
             return df
             
@@ -195,43 +200,57 @@ class BinanceClient:
     
     def get_top_by_volume(self, limit: int = 10) -> List[Dict]:
         """
-        Get top cryptocurrencies by 24h volume
-        
-        Args:
-            limit: Number of top coins to return
-            
-        Returns:
-            List of tickers sorted by volume
+        Get top cryptocurrencies by 24h volume from ALL available pairs
         """
         try:
-            tickers = self.get_multiple_tickers(config.TOP_SYMBOLS)
+            # Fetch all tickers
+            all_tickers = self.exchange.fetch_tickers()
+            
+            # Filter and format
+            valid_tickers = []
+            for symbol, t in all_tickers.items():
+                if '/USDT' in symbol and ':USDT' in symbol:
+                    valid_tickers.append({
+                        'symbol': symbol,
+                        'price': t['last'],
+                        'change_24h': t['percentage'],
+                        'volume_24h': t['quoteVolume'] or 0
+                    })
             
             # Sort by volume
-            tickers.sort(key=lambda x: x['volume_24h'], reverse=True)
+            valid_tickers.sort(key=lambda x: x['volume_24h'], reverse=True)
             
-            return tickers[:limit]
+            return valid_tickers[:limit]
         except Exception as e:
-            raise ValueError(f"Error getting top by volume: {str(e)}")
+            print(f"Error getting top volume (fallback to config list): {e}")
+            return self.get_multiple_tickers(config.TOP_SYMBOLS)[:limit]
     
     def get_top_by_change(self, limit: int = 10) -> List[Dict]:
         """
-        Get top cryptocurrencies by 24h price change %
-        
-        Args:
-            limit: Number of top movers to return
-            
-        Returns:
-            List of tickers sorted by % change
+        Get top cryptocurrencies by 24h price change % from ALL available pairs
         """
         try:
-            tickers = self.get_multiple_tickers(config.TOP_SYMBOLS)
+            # Fetch all tickers
+            all_tickers = self.exchange.fetch_tickers()
             
-            # Sort by percentage change
-            tickers.sort(key=lambda x: abs(x['change_24h']), reverse=True)
+            # Filter and format
+            valid_tickers = []
+            for symbol, t in all_tickers.items():
+                if '/USDT' in symbol and ':USDT' in symbol:
+                    valid_tickers.append({
+                        'symbol': symbol,
+                        'price': t['last'],
+                        'change_24h': t['percentage'],
+                        'volume_24h': t['quoteVolume'] or 0
+                    })
             
-            return tickers[:limit]
+            # Sort by percentage change (absolute value for volatility)
+            valid_tickers.sort(key=lambda x: abs(x['change_24h']), reverse=True)
+            
+            return valid_tickers[:limit]
         except Exception as e:
-            raise ValueError(f"Error getting top by change: {str(e)}")
+            print(f"Error getting top change (fallback to config list): {e}")
+            return self.get_multiple_tickers(config.TOP_SYMBOLS)[:limit]
 
 
 # Singleton instance

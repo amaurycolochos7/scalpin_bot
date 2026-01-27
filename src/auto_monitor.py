@@ -236,9 +236,6 @@ class AutoMonitor:
                 tp = current_price * 0.90  # 10% take profit
             
             
-            # Get grouped votes
-            grouped_votes = analyzer.get_grouped_tradingview_votes()
-            
             return {
                 'symbol': symbol,
                 'symbol_name': symbol_name,
@@ -253,8 +250,7 @@ class AutoMonitor:
                 'short_votes': tv_votes['short_count'],
                 'crossover': crossover,
                 'tv_votes': tv_votes,
-                'grouped_votes': grouped_votes,  # NEW - Grouped indicators
-                # Candle color data (NEW)
+                # Candle color data
                 'candle_15m': candle_15m,
                 'candle_1h': candle_1h,
                 'candle_4h': candle_4h,
@@ -387,74 +383,6 @@ class AutoMonitor:
                 msg += "   ✅ <b>Confirmado (3+ velas)</b>\n"
             
             msg += "\n"
-            
-            # ========== INDICADORES (15M) - COMPLEMENTARIO ==========
-            grouped_votes = result.get('grouped_votes', {})
-            if grouped_votes:
-                msg += "━━━ Indicadores (15m) ━━━\n\n"
-                
-                # OSCILLATORS
-                osc = grouped_votes.get('oscillators', {})
-                if osc:
-                    osc_bar = "🟢" * osc.get('long_count', 0) + "🔴" * osc.get('short_count', 0)
-                    msg += "📊 Osciladores\n"
-                    msg += f"  Venta    Neutral   Compra\n"
-                    msg += f"    {osc.get('short_count', 0)}         {osc.get('neutral_count', 0)}        {osc.get('long_count', 0)}\n"
-                    msg += f"  \n"
-                    msg += f"  {osc_bar} "
-                    
-                    osc_signal = osc.get('signal', 'NEUTRAL')
-                    if osc_signal == 'STRONG_BUY':
-                        msg += "Fuerte Compra\n\n"
-                    elif osc_signal == 'BUY':
-                        msg += "Compra\n\n"
-                    elif osc_signal == 'STRONG_SELL':
-                        msg += "Fuerte Venta\n\n"
-                    elif osc_signal == 'SELL':
-                        msg += "Venta\n\n"
-                    else:
-                        msg += "Neutral\n\n"
-                
-                # MOVING AVERAGES
-                ma = grouped_votes.get('moving_averages', {})
-                if ma:
-                    ma_bar = "🟢" * ma.get('long_count', 0) + "🔴" * ma.get('short_count', 0)
-                    msg += "📊 Medias Móviles\n"
-                    msg += f"  Venta    Neutral   Compra\n"
-                    msg += f"    {ma.get('short_count', 0)}         {ma.get('neutral_count', 0)}        {ma.get('long_count', 0)}\n"
-                    msg += f"  \n"
-                    msg += f"  {ma_bar} "
-                    
-                    ma_signal = ma.get('signal', 'NEUTRAL')
-                    if ma_signal == 'STRONG_BUY':
-                        msg += "Fuerte Compra\n\n"
-                    elif ma_signal == 'BUY':
-                        msg += "Compra\n\n"
-                    elif ma_signal == 'STRONG_SELL':
-                        msg += "Fuerte Venta\n\n"
-                    elif ma_signal == 'SELL':
-                        msg += "Venta\n\n"
-                    else:
-                        msg += "Neutral\n\n"
-                
-                # SUMMARY
-                summary = grouped_votes.get('summary', {})
-                summary_signal = summary.get('signal', 'NEUTRAL')
-                if summary_signal == 'STRONG_BUY':
-                    msg += "Resumen: 🟢 FUERTE COMPRA\n"
-                elif summary_signal == 'BUY':
-                    msg += "Resumen: 🟢 COMPRA\n"
-                elif summary_signal == 'STRONG_SELL':
-                    msg += "Resumen: 🔴 FUERTE VENTA\n"
-                elif summary_signal == 'SELL':
-                    msg += "Resumen: 🔴 VENTA\n"
-                else:
-                    msg += "Resumen: ⚪ NEUTRAL\n"
-                
-                if summary_signal in ['STRONG_BUY', 'STRONG_SELL']:
-                    msg += "(Ambos grupos confirman)\n"
-                
-                msg += "\n"
             
             # ========== SIGNAL ==========
             msg += "━━━━━━━━━━━━━━━━━━━━\n"

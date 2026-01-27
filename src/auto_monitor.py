@@ -228,12 +228,12 @@ class AutoMonitor:
             # Calculate entry/exit levels
             if signal_type == 'LONG':
                 entry = current_price
-                sl = current_price * 0.98  # 2% stop loss
-                tp = current_price * 1.04  # 4% take profit
+                sl = current_price * 0.95  # 5% stop loss
+                tp = current_price * 1.10  # 10% take profit
             else:
                 entry = current_price
-                sl = current_price * 1.02  # 2% stop loss
-                tp = current_price * 0.96  # 4% take profit
+                sl = current_price * 1.05  # 5% stop loss
+                tp = current_price * 0.90  # 10% take profit
             
             return {
                 'symbol': symbol,
@@ -387,11 +387,11 @@ class AutoMonitor:
             
             msg += f"{result['reason']}\n\n"
             
-            # Levels
-            msg += f"📊 Niveles:\n"
-            msg += f"  Entrada → {fmt_price(result['entry'])}\n"
-            msg += f"  Stop    → {fmt_price(result['sl'])}\n"
-            msg += f"  Target  → {fmt_price(result['tp'])}\n\n"
+            # Levels - FORMATO COPIABLE
+            msg += f"━━━ COPIAR ━━━\n\n"
+            msg += f"Moneda: `{symbol_name}`\n"
+            msg += f"Take Profit: `{fmt_price(result['tp'])}`\n"
+            msg += f"Stop Loss: `{fmt_price(result['sl'])}`\n\n"
             
             msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}"
             

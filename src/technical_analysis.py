@@ -811,6 +811,228 @@ class TechnicalAnalyzer:
             'confirmed': confirmed
         }
     
+    def get_grouped_tradingview_votes(self) -> dict:
+        """
+        Get votes from indicators GROUPED into Oscillators and Moving Averages
+        Following TradingView's approach
+        
+        Returns:
+            Dictionary with grouped votes:
+            - oscillators: {votes, long_count, short_count, neutral_count, signal}
+            - moving_averages: {votes, long_count, short_count, neutral_count, signal}
+            - summary: Overall signal (only STRONG if both groups agree)
+        """
+        last = self.df.iloc[-1]
+        prev = self.df.iloc[-2] if len(self.df) > 1 else last
+        
+        oscillator_votes = {}
+        ma_votes = {}
+        
+        # ========== OSCILLATORS GROUP (6 indicators) ==========
+        
+        # 1. RSI (Relative Strength Index)
+        rsi = last['rsi']
+        if not pd.isna(rsi):
+            if rsi < 30:
+                oscillator_votes['RSI'] = {'vote': 1, 'reason': f'RSI sobreventa ({rsi:.0f})'}
+            elif rsi > 70:
+                oscillator_votes['RSI'] = {'vote': -1, 'reason': f'RSI sobrecompra ({rsi:.0f})'}
+            elif rsi < 50:
+                oscillator_votes['RSI'] = {'vote': -1, 'reason': f'RSI bajista ({rsi:.0f})'}
+            else:
+                oscillator_votes['RSI'] = {'vote': 1, 'reason': f'RSI alcista ({rsi:.0f})'}
+        else:
+            oscillator_votes['RSI'] = {'vote': 0, 'reason': 'RSI no disponible'}
+        
+        # 2. Stochastic %K
+        stoch_k = last.get('stoch_k')
+        stoch_d = last.get('stoch_d')
+        if not pd.isna(stoch_k) and not pd.isna(stoch_d):
+            if stoch_k < 20:
+                oscillator_votes['STOCH'] = {'vote': 1, 'reason': f'Stoch sobreventa ({stoch_k:.0f})'}
+            elif stoch_k > 80:
+                oscillator_votes['STOCH'] = {'vote': -1, 'reason': f'Stoch sobrecompra ({stoch_k:.0f})'}
+            elif stoch_k > stoch_d:
+                oscillator_votes['STOCH'] = {'vote': 1, 'reason': 'Stoch alcista'}
+            else:
+                oscillator_votes['STOCH'] = {'vote': -1, 'reason': 'Stoch bajista'}
+        else:
+            oscillator_votes['STOCH'] = {'vote': 0, 'reason': 'Stoch no disponible'}
+        
+        # 3. MACD Level
+        if not pd.isna(last['macd']) and not pd.isna(last['macd_signal']):
+            macd_diff = last['macd'] - last['macd_signal']
+            if macd_diff > 0:
+                oscillator_votes['MACD'] = {'vote': 1, 'reason': 'MACD alcista'}
+            else:
+                oscillator_votes['MACD'] = {'vote': -1, 'reason': 'MACD bajista'}
+        else:
+            oscillator_votes['MACD'] = {'vote': 0, 'reason': 'MACD no disponible'}
+        
+        # 4. ADX (Average Directional Index)
+        adx = last.get('adx', 0)
+        adx_plus = last.get('adx_plus', 0)
+        adx_minus = last.get('adx_minus', 0)
+        if adx > 20:  # Strong trend
+            if adx_plus > adx_minus:
+                oscillator_votes['ADX'] = {'vote': 1, 'reason': f'ADX alcista ({adx:.0f})'}
+            else:
+                oscillator_votes['ADX'] = {'vote': -1, 'reason': f'ADX bajista ({adx:.0f})'}
+        else:
+            oscillator_votes['ADX'] = {'vote': 0, 'reason': f'Sin tendencia fuerte ({adx:.0f})'}
+        
+        # 5. Momentum (ROC - Rate of Change)
+        roc = last.get('roc', 0)
+        if not pd.isna(roc):
+            if roc > 2:
+                oscillator_votes['MOM'] = {'vote': 1, 'reason': f'Momentum positivo ({roc:.1f}%)'}
+            elif roc < -2:
+                oscillator_votes['MOM'] = {'vote': -1, 'reason': f'Momentum negativo ({roc:.1f}%)'}
+            else:
+                oscillator_votes['MOM'] = {'vote': 0, 'reason': f'Momentum neutral ({roc:.1f}%)'}
+        else:
+            oscillator_votes['MOM'] = {'vote': 0, 'reason': 'Momentum no disponible'}
+        
+        # 6. Bull Bear Power (using OBV as proxy)
+        obv_trend = self.df['obv'].iloc[-5:].diff().mean() if len(self.df) >= 5 else 0
+        if obv_trend > 0:
+            oscillator_votes['BBP'] = {'vote': 1, 'reason': 'OBV subiendo'}
+        elif obv_trend < 0:
+            oscillator_votes['BBP'] = {'vote': -1, 'reason': 'OBV bajando'}
+        else:
+            oscillator_votes['BBP'] = {'vote': 0, 'reason': 'OBV neutral'}
+        
+        # ========== MOVING AVERAGES GROUP (6 indicators) ==========
+        
+        # 1. MA7 - Price vs MA7
+        if last['close'] > last['ma_7']:
+            ma_votes['MA7'] = {'vote': 1, 'reason': 'Precio arriba de MA7'}
+        elif last['close'] < last['ma_7']:
+            ma_votes['MA7'] = {'vote': -1, 'reason': 'Precio abajo de MA7'}
+        else:
+            ma_votes['MA7'] = {'vote': 0, 'reason': 'Precio en MA7'}
+        
+        # 2. MA25 - Price vs MA25
+        if last['close'] > last['ma_25']:
+            ma_votes['MA25'] = {'vote': 1, 'reason': 'Precio arriba de MA25'}
+        elif last['close'] < last['ma_25']:
+            ma_votes['MA25'] = {'vote': -1, 'reason': 'Precio abajo de MA25'}
+        else:
+            ma_votes['MA25'] = {'vote': 0, 'reason': 'Precio en MA25'}
+        
+        # 3. MA99 - Price vs MA99
+        if not pd.isna(last['ma_99']):
+            if last['close'] > last['ma_99']:
+                ma_votes['MA99'] = {'vote': 1, 'reason': 'Precio arriba de MA99'}
+            elif last['close'] < last['ma_99']:
+                ma_votes['MA99'] = {'vote': -1, 'reason': 'Precio abajo de MA99'}
+            else:
+                ma_votes['MA99'] = {'vote': 0, 'reason': 'Precio en MA99'}
+        else:
+            ma_votes['MA99'] = {'vote': 0, 'reason': 'MA99 no disponible'}
+        
+        # 4. EMA9 - Price vs EMA9
+        if last['close'] > last['ema_9']:
+            ma_votes['EMA9'] = {'vote': 1, 'reason': 'Precio arriba de EMA9'}
+        elif last['close'] < last['ema_9']:
+            ma_votes['EMA9'] = {'vote': -1, 'reason': 'Precio abajo de EMA9'}
+        else:
+            ma_votes['EMA9'] = {'vote': 0, 'reason': 'Precio en EMA9'}
+        
+        # 5. EMA21 - Price vs EMA21
+        if last['close'] > last['ema_21']:
+            ma_votes['EMA21'] = {'vote': 1, 'reason': 'Precio arriba de EMA21'}
+        elif last['close'] < last['ema_21']:
+            ma_votes['EMA21'] = {'vote': -1, 'reason': 'Precio abajo de EMA21'}
+        else:
+            ma_votes['EMA21'] = {'vote': 0, 'reason': 'Precio en EMA21'}
+        
+        # 6. EMA50 - Price vs EMA50
+        if last['close'] > last['ema_50']:
+            ma_votes['EMA50'] = {'vote': 1, 'reason': 'Precio arriba de EMA50'}
+        elif last['close'] < last['ema_50']:
+            ma_votes['EMA50'] = {'vote': -1, 'reason': 'Precio abajo de EMA50'}
+        else:
+            ma_votes['EMA50'] = {'vote': 0, 'reason': 'Precio en EMA50'}
+        
+        # ========== CALCULATE SUMMARIES ==========
+        
+        # Oscillators summary
+        osc_long = sum(1 for v in oscillator_votes.values() if v['vote'] > 0)
+        osc_short = sum(1 for v in oscillator_votes.values() if v['vote'] < 0)
+        osc_neutral = sum(1 for v in oscillator_votes.values() if v['vote'] == 0)
+        
+        if osc_long >= 5:
+            osc_signal = 'STRONG_BUY'
+        elif osc_long >= 4:
+            osc_signal = 'BUY'
+        elif osc_short >= 5:
+            osc_signal = 'STRONG_SELL'
+        elif osc_short >= 4:
+            osc_signal = 'SELL'
+        else:
+            osc_signal = 'NEUTRAL'
+        
+        # Moving Averages summary
+        ma_long = sum(1 for v in ma_votes.values() if v['vote'] > 0)
+        ma_short = sum(1 for v in ma_votes.values() if v['vote'] < 0)
+        ma_neutral = sum(1 for v in ma_votes.values() if v['vote'] == 0)
+        
+        if ma_long >= 5:
+            ma_signal = 'STRONG_BUY'
+        elif ma_long >= 4:
+            ma_signal = 'BUY'
+        elif ma_short >= 5:
+            ma_signal = 'STRONG_SELL'
+        elif ma_short >= 4:
+            ma_signal = 'SELL'
+        else:
+            ma_signal = 'NEUTRAL'
+        
+        # Overall summary (ONLY strong if BOTH groups agree with strong signal)
+        if osc_signal == 'STRONG_BUY' and ma_signal == 'STRONG_BUY':
+            summary_signal = 'STRONG_BUY'
+            summary_reason = 'Ambos grupos confirman FUERTE COMPRA'
+        elif osc_signal == 'STRONG_SELL' and ma_signal == 'STRONG_SELL':
+            summary_signal = 'STRONG_SELL'
+            summary_reason = 'Ambos grupos confirman FUERTE VENTA'
+        elif osc_signal in ['STRONG_BUY', 'BUY'] and ma_signal in ['STRONG_BUY', 'BUY']:
+            summary_signal = 'BUY'
+            summary_reason = 'Ambos grupos confirman COMPRA'
+        elif osc_signal in ['STRONG_SELL', 'SELL'] and ma_signal in ['STRONG_SELL', 'SELL']:
+            summary_signal = 'SELL'
+            summary_reason = 'Ambos grupos confirman VENTA'
+        else:
+            summary_signal = 'NEUTRAL'
+            summary_reason = f'Grupos no alineados (Osc: {osc_signal}, MA: {ma_signal})'
+        
+        return {
+            'oscillators': {
+                'votes': oscillator_votes,
+                'long_count': osc_long,
+                'short_count': osc_short,
+                'neutral_count': osc_neutral,
+                'total': len(oscillator_votes),
+                'signal': osc_signal
+            },
+            'moving_averages': {
+                'votes': ma_votes,
+                'long_count': ma_long,
+                'short_count': ma_short,
+                'neutral_count': ma_neutral,
+                'total': len(ma_votes),
+                'signal': ma_signal
+            },
+            'summary': {
+                'signal': summary_signal,
+                'reason': summary_reason,
+                'total_long': osc_long + ma_long,
+                'total_short': osc_short + ma_short,
+                'total_neutral': osc_neutral + ma_neutral
+            }
+        }
+
+    
     def generate_analysis(self) -> Dict:
         """
         Generate complete technical analysis with scoring system

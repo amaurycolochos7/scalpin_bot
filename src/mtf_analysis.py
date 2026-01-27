@@ -46,8 +46,11 @@ class MTFAnalysis:
     # MA7/MA25 Crossover
     ma_crossover: dict
     
-    # TradingView 10 Indicators
+    # TradingView 10 Indicators (Legacy)
     tv_votes: dict
+    
+    # Grouped TradingView Indicators (NEW - Oscillators + Moving Averages)
+    grouped_votes: dict
     
     # Candle Color Confirmation (NEW - Friend's strategy)
     candle_confirmation_15m: dict  # 15m candle color data
@@ -89,6 +92,7 @@ class MultiTimeframeAnalyzer:
         
         ma_crossover = analyzer_15m.detect_ma_crossover()
         tv_votes = analyzer_15m.get_tradingview_votes()
+        grouped_votes = analyzer_15m.get_grouped_tradingview_votes()
         candle_15m = analyzer_15m.detect_candle_color_trend(lookback=6)
         analysis_15m = analyzer_15m.generate_analysis()
         
@@ -172,9 +176,9 @@ class MultiTimeframeAnalyzer:
         ticker = self.client.get_ticker(symbol)
         current_price = ticker['price']
         
-        # Make trading decision using NEW candle color strategy
+        # Make trading decision using NEW grouped indicators + candle strategy
         should_trade, direction, confidence, reason = self._make_decision(
-            tf_4h_data, tf_1h_data, tf_15m_data, candle_15m, tv_votes
+            tf_4h_data, tf_1h_data, tf_15m_data, candle_15m, grouped_votes
         )
         
         # Collect warnings
@@ -188,6 +192,7 @@ class MultiTimeframeAnalyzer:
             tf_4h=tf_4h_data,
             ma_crossover=ma_crossover,
             tv_votes=tv_votes,
+            grouped_votes=grouped_votes,
             candle_confirmation_15m=candle_15m,
             should_trade=should_trade,
             trade_direction=direction,
@@ -197,18 +202,26 @@ class MultiTimeframeAnalyzer:
         )
     
     def _make_decision(self, tf_4h: Optional[TimeframeData], tf_1h: Optional[TimeframeData], 
-                       tf_15m: Optional[TimeframeData], candle_15m: dict, tv_votes: dict) -> tuple:
+                       tf_15m: Optional[TimeframeData], candle_15m: dict, grouped_votes: dict) -> tuple:
         """
-        Make trading decision based on CANDLE COLOR STRATEGY:
+        Make trading decision based on GROUPED INDICATORS + CANDLE COLOR:
         
-        1. 4H: Tendencia principal (alcista/bajista)
-        2. 1H: Confirmación intermedia
-        3. 15m: 3+ velas del mismo color = confirmación de cambio
+        Requirements:
+        1. Oscillators must be STRONG_BUY or STRONG_SELL (5+ votes)
+        2. Moving Averages must be STRONG_BUY or STRONG_SELL (5+ votes)
+        3. Both groups must agree (same direction)
+        4. 15m candle color confirmation (3+ velas)
         
         Returns: (should_trade, direction, confidence, reason)
         """
         
-        # Get 15m candle confirmation (KEY SIGNAL)
+        # Get grouped indicators summary
+        summary = grouped_votes.get('summary', {})
+        osc_signal = grouped_votes.get('oscillators', {}).get('signal', 'NEUTRAL')
+        ma_signal = grouped_votes.get('moving_averages', {}).get('signal', 'NEUTRAL')
+        summary_signal = summary.get('signal', 'NEUTRAL')
+        
+        # Get 15m candle confirmation
         candle_trend = candle_15m.get('trend_change', 'NONE')
         candle_confirmed = candle_15m.get('confirmed', False)
         consecutive = max(candle_15m.get('consecutive_green', 0), candle_15m.get('consecutive_red', 0))
@@ -248,37 +261,47 @@ class MultiTimeframeAnalyzer:
         
         # ============ DECISION LOGIC ============
         
-        # CASE 1: LONG / COMPRA - All timeframes bullish + 3+ green candles
-        if candle_trend == 'BULLISH' and candle_confirmed:
-            if trend_4h == 'BULLISH' and trend_1h == 'BULLISH':
-                return True, 'LONG', confidence, f'✅ COMPRA / LONG confirmado\n   4H: ▲ | 1H: ▲ | 15m: {consecutive} velas verdes'
-            elif trend_4h == 'BULLISH':
-                return True, 'LONG', confidence - 15, f'🟢 COMPRA / LONG (4H alcista)\n   15m: {consecutive} velas verdes'
-            elif trend_1h == 'BULLISH':
-                return True, 'LONG', confidence - 20, f'🟢 COMPRA / LONG (1H alcista)\n   15m: {consecutive} velas verdes'
+        # CASE 1: LONG / COMPRA - Require BOTH groups to strongly agree
+        if summary_signal == 'STRONG_BUY':
+            # Best case: All aligned
+            if candle_confirmed and trend_4h == 'BULLISH' and trend_1h == 'BULLISH':
+                return True, 'LONG', 95, summary.get('reason', 'Ambos grupos confirman FUERTE COMPRA')
+            elif candle_confirmed:
+                return True, 'LONG', 80, summary.get('reason', 'Ambos grupos confirman FUERTE COMPRA')
+            elif trend_4h == 'BULLISH' and trend_1h == 'BULLISH':
+                return True, 'LONG', 75, summary.get('reason', 'Ambos grupos confirman FUERTE COMPRA')
             else:
-                return False, 'LONG', confidence - 30, f'⚠️ 15m alcista pero TFs superiores no confirman'
+                return True, 'LONG', 65, summary.get('reason', 'Ambos grupos confirman FUERTE COMPRA')
         
-        # CASE 2: SHORT / VENTA - All timeframes bearish + 3+ red candles
-        if candle_trend == 'BEARISH' and candle_confirmed:
-            if trend_4h == 'BEARISH' and trend_1h == 'BEARISH':
-                return True, 'SHORT', confidence, f'✅ VENTA / SHORT confirmado\n   4H: ▼ | 1H: ▼ | 15m: {consecutive} velas rojas'
-            elif trend_4h == 'BEARISH':
-                return True, 'SHORT', confidence - 15, f'🔴 VENTA / SHORT (4H bajista)\n   15m: {consecutive} velas rojas'
-            elif trend_1h == 'BEARISH':
-                return True, 'SHORT', confidence - 20, f'🔴 VENTA / SHORT (1H bajista)\n   15m: {consecutive} velas rojas'
+        # Weaker signal: One group strong, one group moderate
+        elif summary_signal == 'BUY':
+            if candle_confirmed:
+                return True, 'LONG', 60, summary.get('reason', 'Grupos confirman COMPRA')
             else:
-                return False, 'SHORT', confidence - 30, f'⚠️ 15m bajista pero TFs superiores no confirman'
+                return False, 'NEUTRAL', 40, f'Indicadores alcistas pero falta confirmación de velas'
         
-        # CASE 3: Partial confirmation - waiting for 3+ candles
-        if consecutive > 0 and consecutive < 3:
-            if candle_15m.get('consecutive_green', 0) > 0:
-                return False, 'NEUTRAL', 20, f'⏳ ESPERAR - {consecutive} vela(s) verde(s)\n   Necesita 3+ para confirmar COMPRA / LONG'
+        # CASE 2: SHORT / VENTA - Require BOTH groups to strongly agree
+        elif summary_signal == 'STRONG_SELL':
+            # Best case: All aligned
+            if candle_confirmed and trend_4h == 'BEARISH' and trend_1h == 'BEARISH':
+                return True, 'SHORT', 95, summary.get('reason', 'Ambos grupos confirman FUERTE VENTA')
+            elif candle_confirmed:
+                return True, 'SHORT', 80, summary.get('reason', 'Ambos grupos confirman FUERTE VENTA')
+            elif trend_4h == 'BEARISH' and trend_1h == 'BEARISH':
+                return True, 'SHORT', 75, summary.get('reason', 'Ambos grupos confirman FUERTE VENTA')
             else:
-                return False, 'NEUTRAL', 20, f'⏳ ESPERAR - {consecutive} vela(s) roja(s)\n   Necesita 3+ para confirmar VENTA / SHORT'
+                return True, 'SHORT', 65, summary.get('reason', 'Ambos grupos confirman FUERTE VENTA')
         
-        # CASE 4: No clear signal
-        return False, 'NEUTRAL', 10, '⏳ ESPERAR - Sin confirmación de tendencia'
+        # Weaker signal: One group strong, one group moderate
+        elif summary_signal == 'SELL':
+            if candle_confirmed:
+                return True, 'SHORT', 60, summary.get('reason', 'Grupos confirman VENTA')
+            else:
+                return False, 'NEUTRAL', 40, f'Indicadores bajistas pero falta confirmación de velas'
+        
+        # CASE 3: No strong signal from indicators
+        else:
+            return False, 'NEUTRAL', 30, summary.get('reason', 'Grupos no alineados - ESPERAR')
     
     def _collect_warnings(self, tf_4h: Optional[TimeframeData], tf_1h: Optional[TimeframeData],
                           tf_15m: Optional[TimeframeData], candle_15m: dict) -> List[str]:

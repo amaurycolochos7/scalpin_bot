@@ -274,6 +274,9 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         msg += f"┃   {display:^14}   ┃\n"
         msg += f"┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
         
+        # Cripto copiable
+        msg += f"Cripto: `{display}`\n\n"
+        
         msg += f"💰 Precio: {format_price(price)}\n\n"
         
         # MA7/MA25 STATUS
@@ -282,31 +285,64 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         msg += f"MA7: {format_price(mtf_result.ma_crossover['ma7'])}\n"
         msg += f"MA25: {format_price(mtf_result.ma_crossover['ma25'])}\n\n"
         
-        # TRADINGVIEW INDICATORS (10 votes)
-        msg += "━━━ Indicadores TradingView ━━━\n"
-        long_votes = mtf_result.tv_votes['long_count']
-        short_votes = mtf_result.tv_votes['short_count']
-        neutral = mtf_result.tv_votes['neutral_count']
+        # GROUPED TRADINGVIEW INDICATORS
+        grouped_votes = mtf_result.grouped_votes
         
-        # Visual vote bar
-        bar_long = "🟢" * long_votes
-        bar_short = "🔴" * short_votes
+        msg += "━━━ Indicadores TradingView ━━━\n\n"
         
-        msg += f"LONG: {long_votes}  {bar_long}\n"
-        msg += f"SHORT: {short_votes}  {bar_short}\n\n"
+        # OSCILLATORS
+        osc = grouped_votes['oscillators']
+        osc_bar = "🟢" * osc['long_count'] + "🔴" * osc['short_count']
+        msg += "📊 Osciladores\n"
+        msg += f"  Venta    Neutral   Compra\n"
+        msg += f"    {osc['short_count']}         {osc['neutral_count']}        {osc['long_count']}\n\n"
+        msg += f"  {osc_bar} "
         
-        # Individual votes breakdown (compact)
-        msg += "Detalle:\n"
-        for name, vote_data in mtf_result.tv_votes['votes'].items():
-            vote = vote_data['vote']
-            if vote > 0:
-                icon = "🟢"
-            elif vote < 0:
-                icon = "🔴"
-            else:
-                icon = "⚪"
-            msg += f"  {icon} {name}\n"
-        msg += "\n"
+        # Oscillator signal label
+        if osc['signal'] == 'STRONG_BUY':
+            msg += "Fuerte Compra\n\n"
+        elif osc['signal'] == 'BUY':
+            msg += "Compra\n\n"
+        elif osc['signal'] == 'STRONG_SELL':
+            msg += "Fuerte Venta\n\n"
+        elif osc['signal'] == 'SELL':
+            msg += "Venta\n\n"
+        else:
+            msg += "Neutral\n\n"
+        
+        # MOVING AVERAGES
+        ma = grouped_votes['moving_averages']
+        ma_bar = "🟢" * ma['long_count'] + "🔴" * ma['short_count']
+        msg += "📊 Medias Móviles\n"
+        msg += f"  Venta    Neutral   Compra\n"
+        msg += f"    {ma['short_count']}         {ma['neutral_count']}        {ma['long_count']}\n\n"
+        msg += f"  {ma_bar} "
+        
+        # MA signal label
+        if ma['signal'] == 'STRONG_BUY':
+            msg += "Fuerte Compra\n\n"
+        elif ma['signal'] == 'BUY':
+            msg += "Compra\n\n"
+        elif ma['signal'] == 'STRONG_SELL':
+            msg += "Fuerte Venta\n\n"
+        elif ma['signal'] == 'SELL':
+            msg += "Venta\n\n"
+        else:
+            msg += "Neutral\n\n"
+        
+        # SUMMARY
+        summary = grouped_votes['summary']
+        msg += "━━━━━━━━━━━━━━━━━━━━\n"
+        if summary['signal'] == 'STRONG_BUY':
+            msg += "Resumen: 🟢 FUERTE COMPRA\n\n"
+        elif summary['signal'] == 'BUY':
+            msg += "Resumen: 🟢 COMPRA\n\n"
+        elif summary['signal'] == 'STRONG_SELL':
+            msg += "Resumen: 🔴 FUERTE VENTA\n\n"
+        elif summary['signal'] == 'SELL':
+            msg += "Resumen: 🔴 VENTA\n\n"
+        else:
+            msg += "Resumen: ⚪ NEUTRAL\n\n"
         
         # MAIN SIGNAL
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
@@ -316,8 +352,9 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             else:
                 msg += "┏━ SEÑAL: VENTA ▼\n\n"
             
-            msg += f"Confianza: {mtf_result.confidence}% ({long_votes if mtf_result.trade_direction == 'LONG' else short_votes}/10)\n"
-            msg += f"Razón: {mtf_result.reason}\n\n"
+            total_confirmations = summary['total_long'] if mtf_result.trade_direction == 'LONG' else summary['total_short']
+            msg += f"Confianza: {mtf_result.confidence}% ({total_confirmations}/12 confirmaciones)\n"
+            msg += f"Razón: {summary['reason']}\n\n"
             
             # Entry/exit levels - FORMATO COPIABLE
             msg += "━━━ COPIAR ━━━\n\n"
@@ -326,7 +363,7 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"Stop Loss: `{format_price(sl)}`\n\n"
         else:
             msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
-            msg += f"{mtf_result.reason}\n\n"
+            msg += f"{summary['reason']}\n\n"
         
         # Warnings
         if mtf_result.warnings:

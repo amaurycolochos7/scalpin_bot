@@ -252,16 +252,16 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         # Calculate entry/exit levels based on ATR or simple percentage
         if mtf_result.trade_direction == 'LONG':
             entry = price
-            sl = price * 0.98  # 2% stop loss
-            tp1 = price * 1.04  # 4% take profit
+            sl = price * 0.95  # 5% stop loss
+            tp1 = price * 1.10  # 10% take profit
         elif mtf_result.trade_direction == 'SHORT':
             entry = price
-            sl = price * 1.02  # 2% stop loss
-            tp1 = price * 0.96  # 4% take profit
+            sl = price * 1.05  # 5% stop loss
+            tp1 = price * 0.90  # 10% take profit
         else:
             entry = price
-            sl = price * 0.98
-            tp1 = price * 1.02
+            sl = price * 0.95
+            tp1 = price * 1.10
         
         strategy = {
             'entry': entry,
@@ -319,11 +319,11 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"Confianza: {mtf_result.confidence}% ({long_votes if mtf_result.trade_direction == 'LONG' else short_votes}/10)\n"
             msg += f"Razón: {mtf_result.reason}\n\n"
             
-            # Entry/exit levels
-            msg += "📊 Niveles:\n"
-            msg += f"  Entrada → {format_price(entry)}\n"
-            msg += f"  Stop    → {format_price(sl)}\n"
-            msg += f"  Target  → {format_price(tp1)}\n\n"
+            # Entry/exit levels - FORMATO COPIABLE
+            msg += "━━━ COPIAR ━━━\n\n"
+            msg += f"Moneda: `{display}`\n"
+            msg += f"Take Profit: `{format_price(tp1)}`\n"
+            msg += f"Stop Loss: `{format_price(sl)}`\n\n"
         else:
             msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
             msg += f"{mtf_result.reason}\n\n"

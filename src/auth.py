@@ -1,0 +1,72 @@
+import json
+import os
+import secrets
+import string
+import logging
+
+logger = logging.getLogger(__name__)
+
+class AuthManager:
+    """
+    Manages user authentication via one-time access keys.
+    Stores data in a JSON file.
+    """
+    def __init__(self, db_file="access_db.json"):
+        self.db_file = db_file
+        self.authorized_users = set()
+        self.valid_keys = set()
+        self._load_db()
+
+    def _load_db(self):
+        """Load data from JSON file"""
+        if os.path.exists(self.db_file):
+            try:
+                with open(self.db_file, 'r') as f:
+                    data = json.load(f)
+                    self.authorized_users = set(data.get('authorized_users', []))
+                    self.valid_keys = set(data.get('valid_keys', []))
+                logger.info(f"Auth loaded: {len(self.authorized_users)} users, {len(self.valid_keys)} keys")
+            except Exception as e:
+                logger.error(f"Error loading auth db: {e}")
+
+    def _save_db(self):
+        """Save data to JSON file"""
+        try:
+            data = {
+                'authorized_users': list(self.authorized_users),
+                'valid_keys': list(self.valid_keys)
+            }
+            with open(self.db_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving auth db: {e}")
+
+    def is_authorized(self, user_id: int) -> bool:
+        """Check if a user is authorized"""
+        return user_id in self.authorized_users
+
+    def generate_key(self) -> str:
+        """Generate a new random access key and save it"""
+        # Format: XXXX-XXXX-XXXX
+        part1 = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+        part2 = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+        part3 = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(4))
+        key = f"{part1}-{part2}-{part3}"
+        
+        self.valid_keys.add(key)
+        self._save_db()
+        return key
+
+    def redeem_key(self, key: str, user_id: int) -> bool:
+        """
+        Attempt to redeem a key for a user.
+        Returns True if successful, False if invalid.
+        """
+        key = key.strip().upper()
+        if key in self.valid_keys:
+            self.valid_keys.remove(key)
+            self.authorized_users.add(user_id)
+            self._save_db()
+            logger.info(f"Key redeemed by user {user_id}")
+            return True
+        return False

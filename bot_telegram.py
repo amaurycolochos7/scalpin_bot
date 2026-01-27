@@ -20,6 +20,7 @@ from src.auto_monitor import AutoMonitor
 from src.ml_config import MLConfig
 from src.mtf_analysis import MultiTimeframeAnalyzer, format_mtf_analysis
 from src.technical_analysis import TechnicalAnalyzer
+from src.auth import AuthManager
 
 # Logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 client = None
 auto_monitor = None
 mtf_analyzer = None
+auth_manager = None
 
 
 def format_price(price: float) -> str:
@@ -409,7 +411,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MAIN
 # ========================
 def main():
-    global client, auto_monitor, mtf_analyzer
+    global client, auto_monitor, mtf_analyzer, auth_manager
     
     if not config.TELEGRAM_BOT_TOKEN or 'your_' in config.TELEGRAM_BOT_TOKEN:
         print("ERROR: TELEGRAM_BOT_TOKEN no configurado")
@@ -419,6 +421,7 @@ def main():
     try:
         client = get_client()
         mtf_analyzer = MultiTimeframeAnalyzer(client)
+        auth_manager = AuthManager()
         print(f"✅ Conectado a Binance")
         print(f"✅ Estrategia MA7/MA25 + 10 indicadores lista")
         
@@ -464,8 +467,23 @@ def main():
     original_start = app.handlers[0][0].callback
     
     async def start_with_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        global auto_monitor
+        global auto_monitor, auth_manager
         
+        user = update.effective_user
+        if not user:
+            return
+
+        # Check authorization
+        if not auth_manager.is_authorized(user.id):
+            await update.message.reply_text(
+                "⛔ *ACCESO DENEGADO*\n\n"
+                "Para usar este bot, necesitas una llave de acceso.\n"
+                "Por favor, envía tu llave a continuación.\n\n"
+                "Ejemplo: `AAAA-BBBB-CCCC`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
         # Add subscriber for monitor
         if auto_monitor and update.effective_chat:
             auto_monitor.add_subscriber(update.effective_chat.id)
@@ -480,6 +498,50 @@ def main():
     
     # Replace start handler with wrapped version
     app.handlers[0][0].callback = start_with_monitor
+    
+    # Wrap text handler for key redemption
+    original_handle_message = app.handlers[2].callback
+    
+    async def handle_message_with_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        global auth_manager, auto_monitor
+        
+        user = update.effective_user
+        if not user:
+            return
+
+        # If not authorized, check if message is a key
+        if not auth_manager.is_authorized(user.id):
+            text = update.message.text.strip().upper()
+            
+            # Attempt access redemption
+            if auth_manager.redeem_key(text, user.id):
+                await update.message.reply_text(
+                    "✅ *ACCESO CONCEDIDO*\n\n"
+                    "Bienvenido. Ahora puedes usar el bot.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+                # Auto-register for signals
+                if auto_monitor and update.effective_chat:
+                    auto_monitor.add_subscriber(update.effective_chat.id)
+                
+                # Show main menu
+                await start_command(update, context)
+            else:
+                await update.message.reply_text(
+                    "❌ *LLAVE INVÁLIDA*\n\n"
+                    "La llave no existe o ya fue usada.\n"
+                    "Contacta al administrador.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            return
+            
+        # If authorized, proceed to normal handler
+        await original_handle_message(update, context)
+
+    # Replace message handler
+    app.handlers[2].callback = handle_message_with_auth
+
     
     app.post_init = start_monitor
     

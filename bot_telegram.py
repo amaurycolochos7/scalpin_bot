@@ -274,8 +274,8 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         msg += f"┃   {display:^14}   ┃\n"
         msg += f"┗━━━━━━━━━━━━━━━━━━━━┛\n\n"
         
-        # Cripto copiable
-        msg += f"Cripto: `{display}`\n\n"
+        # Cripto copiable (usando HTML en lugar de Markdown)
+        msg += f"Cripto: <code>{display}</code>\n\n"
         
         msg += f"💰 Precio: {format_price(price)}\n\n"
         
@@ -394,11 +394,11 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"{mtf_result.reason}\n\n"
             msg += f"Confianza: {mtf_result.confidence}%\n\n"
             
-            # Entry/exit levels - FORMATO COPIABLE
+            # Entry/exit levels - FORMATO COPIABLE (HTML)
             msg += "━━━ COPIAR ━━━\n\n"
-            msg += f"Moneda: `{display}`\n"
-            msg += f"Take Profit: `{format_price(tp1)}`\n"
-            msg += f"Stop Loss: `{format_price(sl)}`\n\n"
+            msg += f"Moneda: <code>{display}</code>\n"
+            msg += f"Take Profit: <code>{format_price(tp1)}</code>\n"
+            msg += f"Stop Loss: <code>{format_price(sl)}</code>\n\n"
         else:
             msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
             msg += f"{mtf_result.reason}\n\n"
@@ -414,7 +414,7 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         msg += "┗━━━━━━━━━━━━━━━━━━━━"
         
         keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]
-        await loading_msg.edit_text(msg, parse_mode=ParseMode.MARKDOWN, reply_markup=InlineKeyboardMarkup(keyboard))
+        await loading_msg.edit_text(msg, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(keyboard))
         
     except Exception as e:
         logger.error(f"Error analyzing {symbol_name}: {e}", exc_info=True)

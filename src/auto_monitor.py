@@ -235,6 +235,10 @@ class AutoMonitor:
                 sl = current_price * 1.05  # 5% stop loss
                 tp = current_price * 0.90  # 10% take profit
             
+            
+            # Get grouped votes
+            grouped_votes = analyzer.get_grouped_tradingview_votes()
+            
             return {
                 'symbol': symbol,
                 'symbol_name': symbol_name,
@@ -249,6 +253,7 @@ class AutoMonitor:
                 'short_votes': tv_votes['short_count'],
                 'crossover': crossover,
                 'tv_votes': tv_votes,
+                'grouped_votes': grouped_votes,  # NEW - Grouped indicators
                 # Candle color data (NEW)
                 'candle_15m': candle_15m,
                 'candle_1h': candle_1h,
@@ -328,11 +333,15 @@ class AutoMonitor:
             
             # Build message with new format
             if strength == 'confirmed':
-                header = f"✅ *CONFIRMADO - {symbol_name}*"
+                header = f"✅ <b>CONFIRMADO - {symbol_name}</b>"
             else:
-                header = f"📊 *SEÑAL - {symbol_name}*"
+                header = f"📊 <b>SEÑAL - {symbol_name}</b>"
             
             msg = f"{header}\n\n"
+            
+            # Cripto copiable
+            msg += f"Cripto: <code>{symbol_name}</code>\n\n"
+            
             msg += f"💰 Precio: {fmt_price(result['price'])}\n\n"
             
             # ========== MULTI-TIMEFRAME ANALYSIS ==========
@@ -375,25 +384,95 @@ class AutoMonitor:
                 msg += f"   Velas: {candle_15m['candle_colors']}\n"
             
             if candle_15m.get('confirmed'):
-                msg += "   ✅ *Confirmado (3+ velas)*\n"
+                msg += "   ✅ <b>Confirmado (3+ velas)</b>\n"
             
             msg += "\n"
             
+            # ========== INDICADORES (15M) - COMPLEMENTARIO ==========
+            grouped_votes = result.get('grouped_votes', {})
+            if grouped_votes:
+                msg += "━━━ Indicadores (15m) ━━━\n\n"
+                
+                # OSCILLATORS
+                osc = grouped_votes.get('oscillators', {})
+                if osc:
+                    osc_bar = "🟢" * osc.get('long_count', 0) + "🔴" * osc.get('short_count', 0)
+                    msg += "📊 Osciladores\n"
+                    msg += f"  Venta    Neutral   Compra\n"
+                    msg += f"    {osc.get('short_count', 0)}         {osc.get('neutral_count', 0)}        {osc.get('long_count', 0)}\n"
+                    msg += f"  \n"
+                    msg += f"  {osc_bar} "
+                    
+                    osc_signal = osc.get('signal', 'NEUTRAL')
+                    if osc_signal == 'STRONG_BUY':
+                        msg += "Fuerte Compra\n\n"
+                    elif osc_signal == 'BUY':
+                        msg += "Compra\n\n"
+                    elif osc_signal == 'STRONG_SELL':
+                        msg += "Fuerte Venta\n\n"
+                    elif osc_signal == 'SELL':
+                        msg += "Venta\n\n"
+                    else:
+                        msg += "Neutral\n\n"
+                
+                # MOVING AVERAGES
+                ma = grouped_votes.get('moving_averages', {})
+                if ma:
+                    ma_bar = "🟢" * ma.get('long_count', 0) + "🔴" * ma.get('short_count', 0)
+                    msg += "📊 Medias Móviles\n"
+                    msg += f"  Venta    Neutral   Compra\n"
+                    msg += f"    {ma.get('short_count', 0)}         {ma.get('neutral_count', 0)}        {ma.get('long_count', 0)}\n"
+                    msg += f"  \n"
+                    msg += f"  {ma_bar} "
+                    
+                    ma_signal = ma.get('signal', 'NEUTRAL')
+                    if ma_signal == 'STRONG_BUY':
+                        msg += "Fuerte Compra\n\n"
+                    elif ma_signal == 'BUY':
+                        msg += "Compra\n\n"
+                    elif ma_signal == 'STRONG_SELL':
+                        msg += "Fuerte Venta\n\n"
+                    elif ma_signal == 'SELL':
+                        msg += "Venta\n\n"
+                    else:
+                        msg += "Neutral\n\n"
+                
+                # SUMMARY
+                summary = grouped_votes.get('summary', {})
+                summary_signal = summary.get('signal', 'NEUTRAL')
+                if summary_signal == 'STRONG_BUY':
+                    msg += "Resumen: 🟢 FUERTE COMPRA\n"
+                elif summary_signal == 'BUY':
+                    msg += "Resumen: 🟢 COMPRA\n"
+                elif summary_signal == 'STRONG_SELL':
+                    msg += "Resumen: 🔴 FUERTE VENTA\n"
+                elif summary_signal == 'SELL':
+                    msg += "Resumen: 🔴 VENTA\n"
+                else:
+                    msg += "Resumen: ⚪ NEUTRAL\n"
+                
+                if summary_signal in ['STRONG_BUY', 'STRONG_SELL']:
+                    msg += "(Ambos grupos confirman)\n"
+                
+                msg += "\n"
+            
             # ========== SIGNAL ==========
+            msg += "━━━━━━━━━━━━━━━━━━━━\n"
             if signal == 'LONG':
-                msg += f"┏━ *SEÑAL: COMPRA / LONG ▲*\n\n"
+                msg += f"┏━ <b>SEÑAL: COMPRA / LONG ▲</b>\n\n"
             else:
-                msg += f"┏━ *SEÑAL: VENTA / SHORT ▼*\n\n"
+                msg += f"┏━ <b>SEÑAL: VENTA / SHORT ▼</b>\n\n"
             
             msg += f"{result['reason']}\n\n"
             
-            # Levels - FORMATO COPIABLE
+            # Levels - FORMATO COPIABLE (HTML)
             msg += f"━━━ COPIAR ━━━\n\n"
-            msg += f"Moneda: `{symbol_name}`\n"
-            msg += f"Take Profit: `{fmt_price(result['tp'])}`\n"
-            msg += f"Stop Loss: `{fmt_price(result['sl'])}`\n\n"
+            msg += f"Moneda: <code>{symbol_name}</code>\n"
+            msg += f"Take Profit: <code>{fmt_price(result['tp'])}</code>\n"
+            msg += f"Stop Loss: <code>{fmt_price(result['sl'])}</code>\n\n"
             
-            msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}"
+            msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}\n"
+            msg += "┗━━━━━━━━━━━━━━━━━━━━"
             
             # Send to ALL subscribers
             for chat_id in self.subscribers:
@@ -401,7 +480,7 @@ class AutoMonitor:
                     await self.bot.send_message(
                         chat_id=chat_id,
                         text=msg,
-                        parse_mode='Markdown'
+                        parse_mode='HTML'
                     )
                 except Exception as e:
                     logger.error(f"Error sending to {chat_id}: {e}")

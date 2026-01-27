@@ -458,14 +458,7 @@ def main():
     print("="*40)
     print("Presiona Ctrl+C para detener\n")
     
-    # Start auto-monitor in background
-    async def start_monitor(application):
-        global auto_monitor
-        
-        print("🤖 Inicializando auto-monitor...")
-        # Monitor will get chat_id when user sends /start
-        auto_monitor = AutoMonitor(config.TELEGRAM_BOT_TOKEN, chat_id=0)
-        print("✅ Auto-monitor listo")
+
     
     # Update chat_id when user sends /start
     original_start_callback = start_handler.callback
@@ -547,7 +540,22 @@ def main():
     message_handler.callback = handle_message_with_auth
 
     
-    app.post_init = start_monitor
+    # Initialize AutoMonitor (Global)
+    print("🤖 Inicializando auto-monitor...")
+    try:
+        auto_monitor = AutoMonitor(config.TELEGRAM_BOT_TOKEN, chat_id=0)
+        print("✅ Auto-monitor listo")
+    except Exception as e:
+        print(f"❌ Error al iniciar AutoMonitor: {e}")
+    
+    # Start auto-monitor task in background
+    async def start_monitor_task(application):
+        global auto_monitor
+        if auto_monitor and not auto_monitor.is_running:
+            asyncio.create_task(auto_monitor.start())
+            logger.info("Auto-monitor task started via post_init")
+    
+    app.post_init = start_monitor_task
     
     try:
         app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

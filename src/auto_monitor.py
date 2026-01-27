@@ -36,10 +36,17 @@ class AutoMonitor:
             chat_id: Telegram chat ID to send notifications
         """
         self.bot = Bot(token=bot_token)
-        self.chat_id = chat_id
+        self.subscribers = set()
+        if chat_id:
+            self.subscribers.add(chat_id)
+            
         self.client = get_client()
         self.is_running = False
         self.monitored_symbols = []
+        
+        # Persistence file
+        self.subscribers_file = "subscribers.json"
+        self._load_subscribers()
         
         # Track signals to avoid spam
         self.last_signals = {}  # {symbol: {'signal': 'LONG/SHORT', 'time': datetime}}
@@ -51,6 +58,38 @@ class AutoMonitor:
         self.min_votes = 6  # At least 6/10 for alert (7 for strong)
         
         logger.info("AutoMonitor initialized with MA7/MA25 strategy")
+
+    def _load_subscribers(self):
+        """Load subscribers from JSON file"""
+        import json
+        import os
+        try:
+            if os.path.exists(self.subscribers_file):
+                with open(self.subscribers_file, 'r') as f:
+                    data = json.load(f)
+                    self.subscribers = set(data.get('subscribers', []))
+                logger.info(f"Loaded {len(self.subscribers)} subscribers")
+        except Exception as e:
+            logger.error(f"Error loading subscribers: {e}")
+
+    def _save_subscribers(self):
+        """Save subscribers to JSON file"""
+        import json
+        try:
+            with open(self.subscribers_file, 'w') as f:
+                json.dump({'subscribers': list(self.subscribers)}, f)
+        except Exception as e:
+            logger.error(f"Error saving subscribers: {e}")
+
+    def add_subscriber(self, chat_id: int):
+        """Add a new subscriber"""
+        if chat_id not in self.subscribers:
+            self.subscribers.add(chat_id)
+            self._save_subscribers()
+            logger.info(f"New subscriber added: {chat_id}")
+            return True
+        return False
+
     
     def _load_all_futures_symbols(self) -> List[str]:
         """Load ALL available USDT perpetual futures symbols from Binance"""
@@ -268,10 +307,10 @@ class AutoMonitor:
         return signals
     
     async def send_alert(self, result: Dict):
-        """Send Telegram alert for a trading signal with CANDLE COLOR display"""
+        """Send Telegram alert for a trading signal to ALL subscribers"""
         try:
-            if not self.chat_id or self.chat_id == 0:
-                logger.warning("No chat_id set, skipping notification")
+            if not self.subscribers:
+                logger.warning("No subscribers, skipping notification")
                 return
             
             symbol_name = result['symbol_name']
@@ -356,11 +395,16 @@ class AutoMonitor:
             
             msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}"
             
-            await self.bot.send_message(
-                chat_id=self.chat_id,
-                text=msg,
-                parse_mode='Markdown'
-            )
+            # Send to ALL subscribers
+            for chat_id in self.subscribers:
+                try:
+                    await self.bot.send_message(
+                        chat_id=chat_id,
+                        text=msg,
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    logger.error(f"Error sending to {chat_id}: {e}")
             
             # Record signal
             self.last_signals[symbol_name] = {
@@ -368,10 +412,10 @@ class AutoMonitor:
                 'time': datetime.now()
             }
             
-            logger.info(f"Alert sent: {symbol_name} - {signal}")
+            logger.info(f"Alert sent to {len(self.subscribers)} users: {symbol_name} - {signal}")
             
         except Exception as e:
-            logger.error(f"Error sending alert: {e}")
+            logger.error(f"Error sending alert process: {e}")
     
     async def monitor_loop(self):
         """Main monitoring loop"""

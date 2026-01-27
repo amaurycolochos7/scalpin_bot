@@ -188,7 +188,7 @@ MIN_SIGNAL_SCORE=55
 ```powershell
 cd C:\scalpin_bot
 .\venv\Scripts\Activate.ps1
-python bot_telegram.py
+   python bot_telegram.py
 ```
 
 Deberías ver:

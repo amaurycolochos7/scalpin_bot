@@ -466,14 +466,14 @@ def main():
     async def start_with_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global auto_monitor
         
-        # Set chat_id for monitor
+        # Add subscriber for monitor
         if auto_monitor and update.effective_chat:
-            auto_monitor.chat_id = update.effective_chat.id
+            auto_monitor.add_subscriber(update.effective_chat.id)
             
             # Start monitoring if not already running
             if not auto_monitor.is_running:
                 asyncio.create_task(auto_monitor.start())
-                logger.info(f"Started auto-monitor for chat_id: {update.effective_chat.id}")
+                logger.info(f"Started auto-monitor process")
         
         # Call original start command
         await original_start(update, context)

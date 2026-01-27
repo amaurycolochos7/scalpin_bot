@@ -442,9 +442,13 @@ def main():
     )
     
     # Handlers
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    start_handler = CommandHandler("start", start_command)
+    callback_handler = CallbackQueryHandler(handle_callback)
+    message_handler = MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+    
+    app.add_handler(start_handler)
+    app.add_handler(callback_handler)
+    app.add_handler(message_handler)
     
     print("\n" + "="*40)
     print("BOT INICIADO")
@@ -464,7 +468,7 @@ def main():
         print("✅ Auto-monitor listo")
     
     # Update chat_id when user sends /start
-    original_start = app.handlers[0][0].callback
+    original_start_callback = start_handler.callback
     
     async def start_with_monitor(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global auto_monitor, auth_manager
@@ -494,13 +498,13 @@ def main():
                 logger.info(f"Started auto-monitor process")
         
         # Call original start command
-        await original_start(update, context)
+        await original_start_callback(update, context)
     
-    # Replace start handler with wrapped version
-    app.handlers[0][0].callback = start_with_monitor
+    # Replace start handler callback
+    start_handler.callback = start_with_monitor
     
     # Wrap text handler for key redemption
-    original_handle_message = app.handlers[2].callback
+    original_message_callback = message_handler.callback
     
     async def handle_message_with_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         global auth_manager, auto_monitor
@@ -537,10 +541,10 @@ def main():
             return
             
         # If authorized, proceed to normal handler
-        await original_handle_message(update, context)
+        await original_message_callback(update, context)
 
-    # Replace message handler
-    app.handlers[2].callback = handle_message_with_auth
+    # Replace message handler callback
+    message_handler.callback = handle_message_with_auth
 
     
     app.post_init = start_monitor

@@ -279,23 +279,56 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         
         msg += f"💰 Precio: {format_price(price)}\n\n"
         
-        # MA7/MA25 STATUS
-        msg += "━━━ MA7/MA25 (15m) ━━━\n"
-        msg += f"{mtf_result.ma_crossover['description']}\n"
-        msg += f"MA7: {format_price(mtf_result.ma_crossover['ma7'])}\n"
-        msg += f"MA25: {format_price(mtf_result.ma_crossover['ma25'])}\n\n"
+        # ========== ANÁLISIS MULTI-TIMEFRAME (PRINCIPAL) ==========
+        msg += "━━━ Análisis Multi-Timeframe ━━━\n"
         
-        # GROUPED TRADINGVIEW INDICATORS
+        # 4H
+        if mtf_result.tf_4h:
+            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_4h.trend else ("▼" if "BAJISTA" in mtf_result.tf_4h.trend else "▬")
+            msg += f"📊 4H: {trend_icon} {mtf_result.tf_4h.trend}\n"
+            if mtf_result.tf_4h.candle_colors:
+                msg += f"   Velas: {mtf_result.tf_4h.candle_colors}\n"
+        
+        # 1H
+        if mtf_result.tf_1h:
+            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_1h.trend else ("▼" if "BAJISTA" in mtf_result.tf_1h.trend else "▬")
+            msg += f"📊 1H: {trend_icon} {mtf_result.tf_1h.trend}\n"
+            if mtf_result.tf_1h.candle_colors:
+                msg += f"   Velas: {mtf_result.tf_1h.candle_colors}\n"
+        
+        # 15m (KEY CONFIRMATION)
+        candle_data = mtf_result.candle_confirmation_15m
+        consecutive = max(candle_data.get('consecutive_green', 0), candle_data.get('consecutive_red', 0))
+        
+        if candle_data.get('trend_change') == 'BULLISH':
+            msg += f"📊 15m: ▲ {consecutive} velas VERDES\n"
+        elif candle_data.get('trend_change') == 'BEARISH':
+            msg += f"📊 15m: ▼ {consecutive} velas ROJAS\n"
+        else:
+            msg += f"📊 15m: ▬ Sin tendencia clara\n"
+        
+        if mtf_result.tf_15m and mtf_result.tf_15m.candle_colors:
+            msg += f"   Velas: {mtf_result.tf_15m.candle_colors}\n"
+        
+        if candle_data.get('confirmed', False):
+            msg += f"   ✅ Confirmado (3+ velas)\n"
+        elif consecutive > 0:
+            msg += f"   ⏳ Esperando ({consecutive}/3 velas)\n"
+        
+        msg += "\n"
+        
+        # ========== INDICADORES TÉCNICOS (15M) - COMPLEMENTARIO ==========
         grouped_votes = mtf_result.grouped_votes
         
-        msg += "━━━ Indicadores TradingView ━━━\n\n"
+        msg += "━━━ Indicadores (15m) ━━━\n\n"
         
         # OSCILLATORS
         osc = grouped_votes['oscillators']
         osc_bar = "🟢" * osc['long_count'] + "🔴" * osc['short_count']
         msg += "📊 Osciladores\n"
         msg += f"  Venta    Neutral   Compra\n"
-        msg += f"    {osc['short_count']}         {osc['neutral_count']}        {osc['long_count']}\n\n"
+        msg += f"    {osc['short_count']}         {osc['neutral_count']}        {osc['long_count']}\n"
+        msg += f"  \n"
         msg += f"  {osc_bar} "
         
         # Oscillator signal label
@@ -315,7 +348,8 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         ma_bar = "🟢" * ma['long_count'] + "🔴" * ma['short_count']
         msg += "📊 Medias Móviles\n"
         msg += f"  Venta    Neutral   Compra\n"
-        msg += f"    {ma['short_count']}         {ma['neutral_count']}        {ma['long_count']}\n\n"
+        msg += f"    {ma['short_count']}         {ma['neutral_count']}        {ma['long_count']}\n"
+        msg += f"  \n"
         msg += f"  {ma_bar} "
         
         # MA signal label
@@ -332,29 +366,33 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
         
         # SUMMARY
         summary = grouped_votes['summary']
-        msg += "━━━━━━━━━━━━━━━━━━━━\n"
         if summary['signal'] == 'STRONG_BUY':
-            msg += "Resumen: 🟢 FUERTE COMPRA\n\n"
+            msg += "Resumen: 🟢 FUERTE COMPRA\n"
         elif summary['signal'] == 'BUY':
-            msg += "Resumen: 🟢 COMPRA\n\n"
+            msg += "Resumen: 🟢 COMPRA\n"
         elif summary['signal'] == 'STRONG_SELL':
-            msg += "Resumen: 🔴 FUERTE VENTA\n\n"
+            msg += "Resumen: 🔴 FUERTE VENTA\n"
         elif summary['signal'] == 'SELL':
-            msg += "Resumen: 🔴 VENTA\n\n"
+            msg += "Resumen: 🔴 VENTA\n"
         else:
-            msg += "Resumen: ⚪ NEUTRAL\n\n"
+            msg += "Resumen: ⚪ NEUTRAL\n"
         
-        # MAIN SIGNAL
+        # Show if both groups confirm
+        if summary['signal'] in ['STRONG_BUY', 'STRONG_SELL']:
+            msg += "(Ambos grupos confirman)\n"
+        
+        msg += "\n"
+        
+        # ========== MAIN SIGNAL ==========
         msg += "━━━━━━━━━━━━━━━━━━━━\n"
         if mtf_result.should_trade:
             if mtf_result.trade_direction == "LONG":
-                msg += "┏━ SEÑAL: COMPRA ▲\n\n"
+                msg += "┏━ SEÑAL: COMPRA / LONG ▲\n\n"
             else:
-                msg += "┏━ SEÑAL: VENTA ▼\n\n"
+                msg += "┏━ SEÑAL: VENTA / SHORT ▼\n\n"
             
-            total_confirmations = summary['total_long'] if mtf_result.trade_direction == 'LONG' else summary['total_short']
-            msg += f"Confianza: {mtf_result.confidence}% ({total_confirmations}/12 confirmaciones)\n"
-            msg += f"Razón: {summary['reason']}\n\n"
+            msg += f"{mtf_result.reason}\n\n"
+            msg += f"Confianza: {mtf_result.confidence}%\n\n"
             
             # Entry/exit levels - FORMATO COPIABLE
             msg += "━━━ COPIAR ━━━\n\n"
@@ -363,7 +401,7 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
             msg += f"Stop Loss: `{format_price(sl)}`\n\n"
         else:
             msg += "┏━ SEÑAL: ESPERAR ⏳\n\n"
-            msg += f"{summary['reason']}\n\n"
+            msg += f"{mtf_result.reason}\n\n"
         
         # Warnings
         if mtf_result.warnings:
@@ -372,16 +410,7 @@ async def analyze_crypto_command(update: Update, context: ContextTypes.DEFAULT_T
                 msg += f"  {w}\n"
             msg += "\n"
         
-        # Higher timeframe context
-        msg += "━━━ Contexto ━━━\n"
-        if mtf_result.tf_1h:
-            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_1h.trend else ("▼" if "BAJISTA" in mtf_result.tf_1h.trend else "▬")
-            msg += f"  1H: {trend_icon} {mtf_result.tf_1h.trend}\n"
-        if mtf_result.tf_4h:
-            trend_icon = "▲" if "ALCISTA" in mtf_result.tf_4h.trend else ("▼" if "BAJISTA" in mtf_result.tf_4h.trend else "▬")
-            msg += f"  4H: {trend_icon} {mtf_result.tf_4h.trend}\n"
-        
-        msg += f"\n⏰ {datetime.now().strftime('%H:%M:%S')}\n"
+        msg += f"⏰ {datetime.now(MEXICO_TZ).strftime('%H:%M:%S')}\n"
         msg += "┗━━━━━━━━━━━━━━━━━━━━"
         
         keyboard = [[InlineKeyboardButton("← Inicio", callback_data="menu_inicio")]]

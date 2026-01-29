@@ -70,6 +70,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         msg += f"🔴 *Estado:* INICIALIZANDO...\n\n"
 
+    # Check if user has access to signals
+    user_id = None
+    if update.message:
+        user_id = update.message.from_user.id if update.message.from_user else None
+    elif update.callback_query:
+        user_id = update.callback_query.from_user.id if update.callback_query.from_user else None
+    
+    is_authorized = auth_manager.is_authorized(user_id) if user_id and auth_manager else False
+    
+    if not is_authorized:
+        msg += "🔑 *ACCESO LIMITADO*\n"
+        msg += "Puedes analizar criptos manualmente.\n"
+        msg += "Para recibir señales automáticas, necesitas una key.\n"
+        msg += "Envía tu key para activar el acceso completo.\n\n"
     
     msg += "┏━ OPCIONES\n\n"
     msg += "➣ *Resumen del Mercado*\n"
@@ -536,19 +550,11 @@ def main():
         if not user:
             return
 
-        # Check authorization
-        if not auth_manager.is_authorized(user.id):
-            await update.message.reply_text(
-                "⛔ *ACCESO DENEGADO*\n\n"
-                "Para usar este bot, necesitas una llave de acceso.\n"
-                "Por favor, envía tu llave a continuación.\n\n"
-                "Ejemplo: `AAAA-BBBB-CCCC`",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            return
-
-        # Add subscriber for monitor
-        if auto_monitor and update.effective_chat:
+        # Check authorization status
+        is_authorized = auth_manager.is_authorized(user.id)
+        
+        # Add subscriber for monitor ONLY if authorized
+        if is_authorized and auto_monitor and update.effective_chat:
             auto_monitor.add_subscriber(update.effective_chat.id)
             
             # Start monitoring if not already running
@@ -556,7 +562,7 @@ def main():
                 asyncio.create_task(auto_monitor.start())
                 logger.info(f"Started auto-monitor process")
         
-        # Call original start command
+        # Call original start command (no auth check - allow free access)
         await original_start_callback(update, context)
     
     # Replace start handler callback
@@ -572,34 +578,54 @@ def main():
         if not user:
             return
 
-        # If not authorized, check if message is a key
-        if not auth_manager.is_authorized(user.id):
-            text = update.message.text.strip().upper()
-            
-            # Attempt access redemption
+        text = update.message.text.strip().upper()
+        
+        # Check if message looks like a key (format: XXXX-XXXX-XXXX)
+        is_potential_key = len(text.split('-')) == 3 and all(
+            len(part) == 4 and part.isalnum() for part in text.split('-')
+        )
+        
+        # If not authorized and message looks like a key, attempt redemption
+        if not auth_manager.is_authorized(user.id) and is_potential_key:
+            # Attempt key redemption
             if auth_manager.redeem_key(text, user.id):
-                await update.message.reply_text(
-                    "✅ *ACCESO CONCEDIDO*\n\n"
-                    "Bienvenido. Ahora puedes usar el bot.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
+                # Get expiration info
+                expiration = auth_manager.get_user_expiration(user.id)
+                
+                if expiration:
+                    expiration_str = expiration.strftime('%Y-%m-%d %H:%M:%S')
+                    await update.message.reply_text(
+                        "✅ *LLAVE ACTIVADA EXITOSAMENTE*\\n\\n"
+                        f"Ahora recibirás señales automáticas.\\n"
+                        f"📅 Acceso válido hasta: {expiration_str}\\n\\n"
+                        "⏱️ El temporizador ha comenzado.",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                else:
+                    await update.message.reply_text(
+                        "✅ *LLAVE ACTIVADA EXITOSAMENTE*\\n\\n"
+                        "Ahora recibirás señales automáticas.\\n"
+                        "♾️ Acceso permanente concedido.",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 
                 # Auto-register for signals
                 if auto_monitor and update.effective_chat:
                     auto_monitor.add_subscriber(update.effective_chat.id)
+                    logger.info(f"User {user.id} subscribed to auto-monitor after key redemption")
                 
                 # Show main menu
                 await start_command(update, context)
             else:
                 await update.message.reply_text(
-                    "❌ *LLAVE INVÁLIDA*\n\n"
-                    "La llave no existe o ya fue usada.\n"
-                    "Contacta al administrador.",
+                    "❌ *LLAVE INVÁLIDA*\\n\\n"
+                    "La llave no existe o ya fue usada.\\n"
+                    "Contacta al administrador para obtener una llave válida.",
                     parse_mode=ParseMode.MARKDOWN
                 )
             return
             
-        # If authorized, proceed to normal handler
+        # Allow normal operations (crypto analysis) even without authorization
         await original_message_callback(update, context)
 
     # Replace message handler callback

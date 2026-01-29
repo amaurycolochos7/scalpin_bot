@@ -45,3 +45,6 @@ htmlcov/
 
 # Antigravity
 .gemini/
+
+# Database
+access_db.json
